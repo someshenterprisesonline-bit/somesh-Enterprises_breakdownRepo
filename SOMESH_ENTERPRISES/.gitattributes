@@ -1,0 +1,11 @@
+# Windows batch files must keep CRLF line endings or cmd.exe misreads them.
+*.bat   text eol=crlf
+*.sh    text eol=lf
+*.py    text eol=lf
+*.js    text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.xlsx  binary
+*.png   binary

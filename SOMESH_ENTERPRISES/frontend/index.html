@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOMESH ENTERPRISES</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="toasts" aria-live="polite"></div>
+<div id="lunch" role="alertdialog" aria-label="Lunch break"><div><div class="ic">🍽️</div><h1>Lunch break</h1><p id="lunchTxt"></p><p class="small" style="font-size:14px">Timers are paused and tasks are locked. Enjoy your lunch.</p></div></div>
+<div id="banner" role="status">Connection lost. Reconnecting… alerts will resume automatically.</div>
+<div id="sheetBack"></div><aside id="sheet" aria-label="Bill details" aria-hidden="true"></aside>
+<dialog id="dlg"><form method="dialog" id="dlgForm"></form></dialog>
+<!-- Scripts: each file is one part of the app (see CODE_MAP.md). Order matters: core first, main.js last. -->
+<script src="/static/js/core/state-and-api.js"></script>
+<script src="/static/js/core/live-and-load.js"></script>
+<script src="/static/js/core/utils.js"></script>
+<script src="/static/js/core/components.js"></script>
+<script src="/static/js/pages/my-tasks.js"></script>
+<script src="/static/js/pages/pipeline.js"></script>
+<script src="/static/js/pages/pipeline-dragdrop.js"></script>
+<script src="/static/js/pages/activity-alerts.js"></script>
+<script src="/static/js/pages/new-bill-demo.js"></script>
+<script src="/static/js/pages/walkthrough.js"></script>
+<script src="/static/js/pages/workflow-input.js"></script>
+<script src="/static/js/pages/storage.js"></script>
+<script src="/static/js/pages/tracker.js"></script>
+<script src="/static/js/pages/assign-tasks.js"></script>
+<script src="/static/js/pages/task-panel.js"></script>
+<script src="/static/js/pages/automation.js"></script>
+<script src="/static/js/pages/overview.js"></script>
+<script src="/static/js/pages/dashboard.js"></script>
+<script src="/static/js/core/actions.js"></script>
+<script src="/static/js/core/shell.js"></script>
+<script src="/static/js/main.js"></script>
+</body>
+</html>

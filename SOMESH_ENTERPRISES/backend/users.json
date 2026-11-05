@@ -1,0 +1,90 @@
+{
+  "_about": "Everyone on the Monthly Cycle chart. Change from the app's Workflow input page (People sheet of the template).",
+  "users": [
+    {
+      "name": "M. Sampath",
+      "dept": "Executive Office",
+      "role": "CEO - approves every payment",
+      "email": "",
+      "admin": true
+    },
+    {
+      "name": "Sudharsan",
+      "dept": "Operations",
+      "role": "EM - desk head",
+      "email": "",
+      "lead": true
+    },
+    {
+      "name": "Moses",
+      "dept": "Operations",
+      "role": "Billing executive",
+      "email": ""
+    },
+    {
+      "name": "Munro",
+      "dept": "Operations",
+      "role": "Bill delivery",
+      "email": ""
+    },
+    {
+      "name": "Ramya",
+      "dept": "Operations",
+      "role": "Attendance intake",
+      "email": ""
+    },
+    {
+      "name": "Somesh",
+      "dept": "Data Center",
+      "role": "EM - alerts, formats",
+      "email": "",
+      "admin": true,
+      "lead": true
+    },
+    {
+      "name": "Deeraj",
+      "dept": "Data Center",
+      "role": "Scans & logs for Vault",
+      "email": ""
+    },
+    {
+      "name": "Rupashri",
+      "dept": "Finance, Contracts & Vault",
+      "role": "Worksheet, payments",
+      "email": "",
+      "lead": true
+    },
+    {
+      "name": "Hemamalini",
+      "dept": "Finance, Contracts & Vault",
+      "role": "Tally entries",
+      "email": ""
+    },
+    {
+      "name": "Harish",
+      "dept": "Finance, Contracts & Vault",
+      "role": "Vault custodian",
+      "email": ""
+    },
+    {
+      "name": "Nandha",
+      "dept": "Payroll",
+      "role": "Bank details, NEFT",
+      "email": "",
+      "lead": true
+    },
+    {
+      "name": "Jagadeeshwari",
+      "dept": "Payroll",
+      "role": "New staff details",
+      "email": ""
+    },
+    {
+      "name": "Thavamani",
+      "dept": "Payroll / Legal & Compliance",
+      "role": "EPF, ESI files; statutory filing",
+      "email": "",
+      "lead": true
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# Runtime data: every PC keeps its own. Never commit these.
+data/
+storage/
+*.db
+*.db-journal
+*.tmp
+*.tmp.xlsx
+~$*.xlsx
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

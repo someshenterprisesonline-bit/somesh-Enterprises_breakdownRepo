@@ -1,0 +1,266 @@
+{
+  "_about": "The Monthly Cycle stages. Change them from the app: Workflow input -> upload the Excel template, or a Google Sheet link / file path.",
+  "stages": [
+    {
+      "code": "S01",
+      "name": "Receive attendance",
+      "dept": "Operations",
+      "owners": [
+        "Moses",
+        "Ramya"
+      ],
+      "validator": "Sudharsan",
+      "sla_hours": 2,
+      "next": [
+        "S02"
+      ],
+      "output": "Attendance file + inward register"
+    },
+    {
+      "code": "S02",
+      "name": "Mark in master tracker",
+      "dept": "Data Center",
+      "owners": [
+        "Somesh"
+      ],
+      "validator": "Deeraj",
+      "sla_hours": 1,
+      "next": [
+        "S03",
+        "S04"
+      ],
+      "output": "Master tracker entry"
+    },
+    {
+      "code": "S03",
+      "name": "Prepare worksheet",
+      "dept": "Finance, Contracts & Vault",
+      "owners": [
+        "Rupashri"
+      ],
+      "validator": "Hemamalini",
+      "sla_hours": 8,
+      "next": [
+        "S05",
+        "S06",
+        "S08"
+      ],
+      "output": "Bill worksheet (Sheet 1 office copy, last sheet invoice)"
+    },
+    {
+      "code": "S04",
+      "name": "Attendance check",
+      "dept": "Payroll",
+      "owners": [
+        "Jagadeeshwari"
+      ],
+      "validator": "Nandha",
+      "sla_hours": 4,
+      "next": [
+        "S06"
+      ],
+      "output": "Checked attendance",
+      "branch": {
+        "question": "New candidates in this attendance?",
+        "options": {
+          "Yes": [
+            "S04A"
+          ],
+          "No": []
+        }
+      }
+    },
+    {
+      "code": "S04A",
+      "name": "New staff details",
+      "dept": "Payroll",
+      "owners": [
+        "Jagadeeshwari"
+      ],
+      "validator": "Thavamani",
+      "sla_hours": 24,
+      "next": [
+        "S07"
+      ],
+      "output": "Joining form + employee register"
+    },
+    {
+      "code": "S05",
+      "name": "Tally entry",
+      "dept": "Finance, Contracts & Vault",
+      "owners": [
+        "Hemamalini"
+      ],
+      "validator": "Rupashri",
+      "sla_hours": 4,
+      "next": [],
+      "output": "Tally entries"
+    },
+    {
+      "code": "S06",
+      "name": "Salary NEFT file",
+      "dept": "Payroll",
+      "owners": [
+        "Nandha"
+      ],
+      "validator": "Jagadeeshwari",
+      "sla_hours": 4,
+      "next": [
+        "S07"
+      ],
+      "output": "Salary NEFT file",
+      "requires": [
+        "S03",
+        "S04"
+      ]
+    },
+    {
+      "code": "S07",
+      "name": "EPF / ESI files",
+      "dept": "Payroll",
+      "owners": [
+        "Thavamani"
+      ],
+      "validator": "Nandha",
+      "sla_hours": 4,
+      "next": [
+        "S09"
+      ],
+      "output": "ECR / ESI upload files",
+      "requires": [
+        "S06"
+      ],
+      "optional_requires": [
+        "S04A"
+      ]
+    },
+    {
+      "code": "S08",
+      "name": "Arrange bill set",
+      "dept": "Operations",
+      "owners": [
+        "Moses"
+      ],
+      "validator": "Sudharsan",
+      "sla_hours": 4,
+      "next": [
+        "S09"
+      ],
+      "output": "Invoice, stamped receipt, cover letter"
+    },
+    {
+      "code": "S09",
+      "name": "CEO payment approval",
+      "dept": "Executive Office",
+      "owners": [
+        "M. Sampath"
+      ],
+      "validator": "M. Sampath",
+      "sla_hours": 24,
+      "next": [
+        "S10",
+        "S13"
+      ],
+      "output": "Payment approved",
+      "requires": [
+        "S07",
+        "S08"
+      ]
+    },
+    {
+      "code": "S10",
+      "name": "Deliver bill",
+      "dept": "Operations",
+      "owners": [
+        "Munro"
+      ],
+      "validator": "Moses",
+      "sla_hours": 24,
+      "next": [
+        "S11"
+      ],
+      "output": "Signed acknowledgement copy"
+    },
+    {
+      "code": "S11",
+      "name": "Acknowledgement",
+      "dept": "Operations",
+      "owners": [
+        "Moses"
+      ],
+      "validator": "Sudharsan",
+      "sla_hours": 4,
+      "next": [
+        "S15"
+      ],
+      "output": "Bill acknowledgement (soft copy mailed)"
+    },
+    {
+      "code": "S13",
+      "name": "Payments",
+      "dept": "Finance, Contracts & Vault",
+      "owners": [
+        "Rupashri"
+      ],
+      "validator": "Hemamalini",
+      "sla_hours": 24,
+      "next": [
+        "S14"
+      ],
+      "output": "UTR proof + challans"
+    },
+    {
+      "code": "S14",
+      "name": "Statutory filing",
+      "dept": "Legal & Compliance",
+      "owners": [
+        "Thavamani"
+      ],
+      "validator": "Sudharsan",
+      "sla_hours": 48,
+      "next": [
+        "S15"
+      ],
+      "output": "Return acknowledgements"
+    },
+    {
+      "code": "S15",
+      "name": "Scan & log",
+      "dept": "Data Center",
+      "owners": [
+        "Deeraj"
+      ],
+      "validator": "Somesh",
+      "sla_hours": 4,
+      "next": [
+        "S16"
+      ],
+      "output": "Scans logged in master tracker",
+      "requires": [
+        "S11",
+        "S14"
+      ]
+    },
+    {
+      "code": "S16",
+      "name": "Vault storage",
+      "dept": "Finance, Contracts & Vault",
+      "owners": [
+        "Harish"
+      ],
+      "validator": "Rupashri",
+      "sla_hours": 4,
+      "next": [],
+      "output": "Vault index entry"
+    }
+  ],
+  "start_stage": "S01",
+  "final_stages": [
+    "S16"
+  ],
+  "settings": {
+    "demo_speed": 1,
+    "overdue_to_checker": true,
+    "complete_to_admins": true
+  }
+}

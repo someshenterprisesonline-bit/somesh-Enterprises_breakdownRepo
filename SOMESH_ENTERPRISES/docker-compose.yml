@@ -1,0 +1,12 @@
+services:
+  somesh-enterprises:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./storage:/app/storage
+      - ./backend/config.json:/app/backend/config.json
+      - ./backend/users.json:/app/backend/users.json
+      - ./backend/workflow.json:/app/backend/workflow.json
+    restart: unless-stopped

@@ -1,0 +1,107 @@
+// App shell: sign-in, tabs (incl. optional tabs), header, render() which draws the current page and wires its buttons.
+"use strict";
+// ---------------------------------------------------------- admin: optional tabs (hidden until added, remembered per admin on this PC)
+const OPTIONAL_TABS = [["guide", "Walkthrough", "How the process works, step by step"], ["store", "Storage", "Master Tracker, Contract Register, Vault"],
+                       ["admin", "New bill", "Open bills, and the demo controls"], ["input", "Workflow input", "Load or change the workflow from Excel / Google Sheets"]];
+const shownTabs = () => { try { return JSON.parse(store.get("se_tabs_" + S.user) || "[]"); } catch (e) { return []; } };
+function tabMenu() {
+  const on = shownTabs();
+  sheetHtml(`<h2 style="margin:0 0 4px">Tabs</h2><p class="muted small">Add the tabs you need. They are remembered for you on this computer.</p>
+    <div class="panel" style="padding:6px 18px">${OPTIONAL_TABS.map(([k, l, d]) => `<label class="switch"><input type="checkbox" data-opt="${k}" ${on.includes(k) ? "checked" : ""}><span><b>${l}</b><span class="muted small" style="display:block">${d}</span></span></label>`).join("")}</div>`);
+  $("#sheet").querySelectorAll("[data-opt]").forEach(c => c.onchange = () => {
+    const now = shownTabs().filter(k => k !== c.dataset.opt); if (c.checked) now.push(c.dataset.opt);
+    store.set("se_tabs_" + S.user, JSON.stringify(now)); if (!c.checked && S.tab === c.dataset.opt) S.tab = "mine"; render();
+  });
+}
+// ---------------------------------------------------------- shell
+function logout(expired) {
+  if (!expired && S.token) fetch("/api/logout", { method: "POST", headers: hdrs(), body: "{}" }).catch(() => {});
+  S.user = null; S.token = null; S.state = null; S.pipe = null; store.set("se_user", ""); store.set("se_token", ""); if (S.es) S.es.close(); closeSheet(); render();
+}
+async function finishSignIn(r) {
+  S.token = r.token; S.user = r.user; store.set("se_token", r.token); store.set("se_user", r.user); S.tab = "mine"; connect(); load(); askNotify();
+}
+function signIn(name) {
+  const u = S.meta.users.find(x => x.name === name) || {};
+  if (!u.admin) return fetch("/api/login", { method: "POST", headers: hdrs(), body: JSON.stringify({ user: name }) }).then(r => r.json()).then(r => r.ok ? finishSignIn(r) : note("Couldn't sign in", r.error));
+  const d = $("#dlg"), f = $("#dlgForm");
+  f.innerHTML = `<div style="text-align:center">${avatar(name)}<h3 style="margin:10px 0 2px">${esc(name)}</h3><p class="muted small">Admin sign-in. Enter your PIN.</p>
+    <input class="in" id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" aria-label="PIN" style="max-width:200px;text-align:center;font-size:22px;letter-spacing:.3em" required>
+    <p class="small" id="pinErr" style="color:var(--red);min-height:18px;margin:8px 0 0"></p></div>
+    <div class="actions" style="margin-top:10px;justify-content:center"><button class="btn" value="cancel" type="submit" formnovalidate>Cancel</button><button class="btn primary" id="pinGo" type="submit" value="go">Sign in</button></div>`;
+  f.onsubmit = async (e) => {
+    if (e.submitter && e.submitter.value === "cancel") { f.onsubmit = null; return; }
+    e.preventDefault();
+    const r = await fetch("/api/login", { method: "POST", headers: hdrs(), body: JSON.stringify({ user: name, pin: $("#pin").value }) }).then(x => x.json()).catch(() => ({ error: "Can't reach the server" }));
+    if (!r.ok) { $("#pinErr").textContent = r.error || "Wrong PIN"; $("#pin").select(); return; }
+    f.onsubmit = null; d.close(); finishSignIn(r);
+  };
+  d.onclose = () => { f.onsubmit = null; }; d.returnValue = ""; d.showModal(); setTimeout(() => $("#pin").focus(), 50);
+}
+function render() {
+  const app = $("#app");
+  if (!S.meta) { app.innerHTML = `<p class="empty">Loading…</p>`; return; }
+  if (!S.user) {
+    const depts = [...new Set(S.meta.users.map(u => u.dept))];
+    const lq = (S.uq || "").toLowerCase(), match = (u) => !lq || (u.name + " " + u.role + " " + u.dept).toLowerCase().includes(lq);
+    app.innerHTML = `<div class="login"><div class="logo mark">S</div><h1>${APP}</h1><p class="lead">Monthly Cycle · pick your name to see your tasks and alerts.</p>
+      <input class="search" id="uq" placeholder="Type your name" value="${esc(S.uq || "")}" aria-label="Find your name" style="max-width:360px;margin-bottom:6px">
+      ${depts.filter(d => S.meta.users.some(u => u.dept === d && match(u))).map(d => `<h3 class="dept">${esc(d)}</h3><div class="people">${S.meta.users.filter(u => u.dept === d && match(u)).map(u => `<button class="person" data-user="${esc(u.name)}" type="button">${avatar(u.name)}<span><b>${esc(u.name)}</b><small>${esc(u.role)}</small></span></button>`).join("")}</div>`).join("")}</div>`;
+    const uq = $("#uq"); uq.oninput = () => { S.uq = uq.value; render(); const n = $("#uq"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
+    uq.onkeydown = (e) => { if (e.key === "Enter") { const f = app.querySelector("[data-user]"); if (f) f.click(); } };
+    if (!S.uqFocused) { S.uqFocused = true; setTimeout(() => uq.focus(), 0); }
+    app.querySelectorAll("[data-user]").forEach(b => b.onclick = () => { unlockAudio(); signIn(b.dataset.user); });
+    return;
+  }
+  const st = S.state || { mine: [], check: [], unread: 0 };
+  const tabs = [["mine", "My tasks", st.mine.length]];
+  if (isAdmin() || st.check.length || S.tab === "check") tabs.push(["check", "To check", st.check.length]);
+  if (isAdmin()) tabs.push(["tracker", "Tracker"], ["over", "Overview"], ["dash", "Dashboard"], ["pipe", "Pipeline"], ["log", "Activity"], ["alerts", "Alerts", st.unread], ["assign", "Assign tasks"], ["auto", "Automation"]);
+  if (isAdmin()) OPTIONAL_TABS.forEach(([k, l]) => { if (shownTabs().includes(k) || S.tab === k) tabs.push([k, l]); });
+  else if (canStore()) tabs.push(["store", "Storage"]);
+  if (!tabs.some(t => t[0] === S.tab)) S.tab = "mine";
+  const body = { mine: viewMine, check: viewCheck, pipe: viewPipe, log: viewLog, alerts: viewAlerts, guide: viewGuide, admin: viewAdmin, input: viewInput, store: viewStore, over: viewOverview, assign: viewAssign, auto: viewAuto, tracker: viewTracker, dash: viewDash }[S.tab]();
+  const ae = document.activeElement, keep = ae && ["loc", "pq", "lq", "tq", "ttq", "dFrom", "dTo"].includes(ae.id) ? { id: ae.id, v: ae.value, s: ae.selectionStart } : null;
+  const focus = null;
+  app.innerHTML = `<header><div class="bar"><div class="brand"><div class="logo">S</div><div><b style="display:flex;align-items:center;gap:8px">${APP}<i id="dot" class="dot ${S.es && S.es.readyState === 1 ? "on" : ""}" title="Live connection"></i></b></div></div>
+      <button class="btn" id="snd" type="button" aria-pressed="${S.sound}" title="Alert sound">${S.sound ? "🔊" : "🔇"}</button>
+      ${!isAdmin() ? `<button class="btn" id="help" type="button" title="How it works">?</button>` : ""}<button class="btn bell" id="bell" type="button" aria-label="Alerts">🔔${st.unread ? `<b>${st.unread}</b>` : ""}</button>
+      <div class="me">${avatar(S.user)}<b class="small">${esc(S.user)}</b><button class="btn ghost" id="logout" type="button">Switch</button></div></div>
+    ${tabs.length > 1 ? `<div class="tabsWrap"><div class="seg" role="tablist">${tabs.map(([k, l, n]) => `<button role="tab" aria-selected="${S.tab === k}" data-tab="${k}">${l}${n ? `<span class="n">${n}</span>` : ""}</button>`).join("")}${isAdmin() ? `<button type="button" id="moreTabs" title="Add or remove tabs" aria-label="Add or remove tabs" style="font-size:15px">＋</button>` : ""}</div></div>` : ""}${isAdmin() && lunchNow() ? `<div class="lunchbar">Lunch break: staff are locked and timers are paused until ${ampm((S.meta.lunch || {}).end || "14:00")}</div>` : ""}</header>
+    <main>${body}</main>`;
+  if (keep) { const l = $("#" + keep.id); if (l) { l.value = keep.v; l.focus(); try { l.setSelectionRange(keep.s, keep.s); } catch (e) {} } }
+  app.querySelectorAll("[data-bill]").forEach(b => b.onclick = () => loadBill(b.dataset.bill));
+  const pq = $("#pq"); if (pq) pq.oninput = () => { S.pq = pq.value; render(); };
+  const lq = $("#lq"); if (lq) lq.oninput = () => { S.lq = lq.value; render(); };
+  app.querySelectorAll("[data-pf]").forEach(b => b.onclick = () => { S.pf = b.dataset.pf; render(); });
+  const csv = $("#csv"); if (csv) csv.onclick = exportCsv;
+  app.querySelectorAll("[data-pv]").forEach(b => b.onclick = async () => { S.pv = b.dataset.pv; render(); if (S.pv === "time") { try { S.tt = await api(ttUrl()); } catch (e) {} render(); } });
+  app.querySelectorAll("[data-demo]").forEach(c => c.onchange = async () => { S.showDemo = c.checked; render(); await load(); });
+  const ttD = $("#ttDate"); if (ttD) ttD.onchange = async () => { S.ttDate = ttD.value; try { S.tt = await api(ttUrl()); } catch (e) { note("Couldn't load", e.message); } render(); };
+  const ttq = $("#ttq"); if (ttq) ttq.oninput = () => { S.ttq = ttq.value; render(); };
+  hideTip(); app.querySelectorAll("[data-tip]").forEach(el => { el.onmouseenter = el.onfocus = () => showTip(el); el.onmouseleave = el.onblur = hideTip; });
+  const ttd = $("#ttd"); if (ttd) ttd.onchange = () => { S.ttd = ttd.value; render(); };
+  const ttB = $("#ttBusy"); if (ttB) ttB.onchange = () => { S.ttBusy = ttB.checked; render(); };
+  app.querySelectorAll("[data-tab]").forEach(b => b.onclick = async () => { S.tab = b.dataset.tab; if (S.tab === "alerts") api("/api/alerts/read", {}).then(load); if (S.tab === "input") { try { S.wf = await api("/api/workflow"); } catch (e) {} } if (S.tab === "store") { try { S.st = await api("/api/storage"); } catch (e) {} } if (S.tab === "assign") { try { S.adhoc = await api("/api/adhoc"); } catch (e) {} } if (S.tab === "auto") { try { S.autoCfg = await api("/api/automation"); } catch (e) {} } if (S.tab === "tracker") { try { S.tr = await api(trUrl()); } catch (e) {} } if (S.tab === "pipe") { try { S.tt = await api(ttUrl()); if (!S.tpls) S.tpls = (await api("/api/templates")).templates; } catch (e) {} } if (S.tab === "dash") { render(); try { S.dash = await api(dashUrl()); } catch (e) {} } render(); });
+  $("#logout").onclick = logout;
+  $("#snd").onclick = () => { S.sound = !S.sound; store.set("se_sound", S.sound ? "on" : "off"); unlockAudio(); if (S.sound) beep(); render(); };
+  $("#bell").onclick = () => { if (isAdmin()) { S.tab = "alerts"; api("/api/alerts/read", {}).then(load); render(); return; }
+    api("/api/alerts/read", {}).then(load); sheetHtml(`<h2 style="margin:0 0 14px">Alerts</h2>${viewAlerts().replace(/^<div class="hero">[\s\S]*?<\/div><\/div>/, "")}`); };
+  const hb = $("#help"); if (hb) hb.onclick = () => sheetHtml(viewGuide());
+  const mt = $("#moreTabs"); if (mt) mt.onclick = tabMenu;
+  app.querySelectorAll("[data-docs]").forEach(b => b.onclick = () => showDocs(b.dataset.docs));
+  app.querySelectorAll("[data-act]").forEach(b => b.onclick = () => act(b.dataset.act, Number(b.dataset.id)));
+  if (S.tab === "admin") wireAdmin();
+  if (S.tab === "input" && isAdmin()) wireInput();
+  if (S.tab === "store") wireStore();
+  if (S.tab === "assign") wireAssign();
+  if (S.tab === "tracker") wireTracker();
+  if (S.tab === "auto") wireAuto();
+  if (S.tab === "pipe" && isAdmin()) { wirePalette(); const hd = app.querySelector("header"); if (hd) document.documentElement.style.setProperty("--hdr", hd.offsetHeight + "px"); }
+  if (S.tab === "dash") wireDash();
+  app.querySelectorAll("[data-deltask]").forEach(b => b.onclick = () => { const t = ((S.adhoc || {}).tasks || []).find(x => x.id === Number(b.dataset.deltask)); if (t) deleteTask(t); });
+  app.querySelectorAll("[data-preview]").forEach(b => b.onclick = () => showPreview(b.dataset.preview));
+  app.querySelectorAll("[data-attach]").forEach(i => i.onchange = () => attachFiles(Number(i.dataset.attach), [...i.files]));
+  app.querySelectorAll("[data-unattach]").forEach(b => b.onclick = async () => { try { await api(`/api/tasks/${b.dataset.unattach}/unupload`, { name: b.dataset.name }); load(); } catch (e) { note("Couldn't remove", e.message); } });
+}
+function askNotify() { try { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); } catch (e) {} }
