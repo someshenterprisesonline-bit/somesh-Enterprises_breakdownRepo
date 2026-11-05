@@ -64,8 +64,8 @@ function render() {
   const ae = document.activeElement, keep = ae && ["loc", "pq", "lq", "tq", "ttq", "dFrom", "dTo"].includes(ae.id) ? { id: ae.id, v: ae.value, s: ae.selectionStart } : null;
   const focus = null;
   app.innerHTML = `<header><div class="bar"><div class="brand"><div class="logo">S</div><div><b style="display:flex;align-items:center;gap:8px">${APP}<i id="dot" class="dot ${S.es && S.es.readyState === 1 ? "on" : ""}" title="Live connection"></i></b></div></div>
-      <button class="btn" id="snd" type="button" aria-pressed="${S.sound}" title="Alert sound">${S.sound ? "🔊" : "🔇"}</button>
-      ${!isAdmin() ? `<button class="btn" id="help" type="button" title="How it works">?</button>` : ""}<button class="btn bell" id="bell" type="button" aria-label="Alerts">🔔${st.unread ? `<b>${st.unread}</b>` : ""}</button>
+      <button class="btn" id="snd" type="button" aria-pressed="${S.sound}" title="Alert sound" aria-label="Alert sound">${S.sound ? "🔊" : "🔇"}</button>
+      ${!isAdmin() ? `<button class="btn" id="help" type="button" title="How it works" aria-label="How it works">?</button>` : ""}<button class="btn bell" id="bell" type="button" aria-label="Alerts${st.unread ? `, ${st.unread} unread` : ""}">🔔${st.unread ? `<b>${st.unread}</b>` : ""}</button>
       <div class="me">${avatar(S.user)}<b class="small">${esc(S.user)}</b><button class="btn ghost" id="logout" type="button">Switch</button></div></div>
     ${tabs.length > 1 ? `<div class="tabsWrap"><div class="seg" role="tablist">${tabs.map(([k, l, n]) => `<button role="tab" aria-selected="${S.tab === k}" data-tab="${k}">${l}${n ? `<span class="n">${n}</span>` : ""}</button>`).join("")}${isAdmin() ? `<button type="button" id="moreTabs" title="Add or remove tabs" aria-label="Add or remove tabs" style="font-size:15px">＋</button>` : ""}</div></div>` : ""}${isAdmin() && lunchNow() ? `<div class="lunchbar">Lunch break: staff are locked and timers are paused until ${ampm((S.meta.lunch || {}).end || "14:00")}</div>` : ""}</header>
     <main>${body}</main>`;

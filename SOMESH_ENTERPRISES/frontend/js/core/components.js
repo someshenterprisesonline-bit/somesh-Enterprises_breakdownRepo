@@ -5,7 +5,7 @@ function taskCard(t, mode) {
   const canAttach = mode !== "check" && t.assignee === S.user && S.meta.storage && (t.adhoc ? t.status === "approved" : t.status === "in_progress");
   const own = mode !== "check" && (t.files.length || canAttach) ? `<div class="box"><b>${t.adhoc ? "Documents" : "Your files"}${t.accept.length ? ` <span class="muted small" style="font-weight:500">· accepts ${esc(t.accept.join(", "))}</span>` : ""}${t.file_required || (t.adhoc && t.needs_docs) ? ` <span class="pill p-soon" style="font-size:11px">required</span>` : ""}</b>
       ${t.files.length ? fileList(t.files, canAttach ? t.id : 0) : `<div class="muted small">No files attached yet.</div>`}
-      ${canAttach ? `<label class="btn" style="margin-top:8px;display:inline-block;cursor:pointer">＋ Attach files<input type="file" multiple hidden data-attach="${t.id}" ${t.accept.length ? `accept="${esc(t.accept.map(a => "." + a).join(","))}"` : ""}></label>` : ""}</div>` : "";
+      ${canAttach ? `<label class="btn" style="margin-top:8px;display:inline-block;cursor:pointer">＋ Attach files<input type="file" multiple class="vh" data-attach="${t.id}" ${t.accept.length ? `accept="${esc(t.accept.map(a => "." + a).join(","))}"` : ""}></label>` : ""}</div>` : "";
   const back = t.decision_note && t.status === "in_progress" && t.rework_count ? `<div class="back"><b>Sent back:</b> ${esc(t.decision_note)}</div>` : "";
   let acts = "";
   if (mode === "check") acts = `<button class="btn good" data-act="approve" data-id="${t.id}">Approve &amp; hand over</button><button class="btn bad" data-act="reject" data-id="${t.id}">Send back</button>`;
@@ -31,7 +31,7 @@ function fileList(files, removeFor) {
 }
 S.docs = {};
 const docsBtn = (key, title, files) => { if (!files || !files.length) return ""; S.docs[key] = { title, files };
-  return `<button class="btn" type="button" data-docs="${esc(key)}" style="padding:4px 12px;font-size:13px" title="View or download">📄 ${files.length}</button>`; };
+  return `<button class="btn" type="button" data-docs="${esc(key)}" style="padding:4px 12px;font-size:13px" title="View or download" aria-label="Documents: ${files.length} file${files.length === 1 ? "" : "s"}">📄 ${files.length}</button>`; };
 function showDocs(key) {
   const d = S.docs[key]; if (!d) return;
   sheetHtml(`<div class="code">DOCUMENTS</div><h2 style="margin:2px 0 4px">${esc(d.title)}</h2><p class="muted small">${d.files.length} file${d.files.length === 1 ? "" : "s"} · open to view, preview spreadsheets, or download.${isAdmin() ? " Downloading also saves a copy in the storage folder, by department and person." : ""}</p>

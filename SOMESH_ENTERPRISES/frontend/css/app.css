@@ -235,3 +235,22 @@ body.dragging .tt-row[data-person] .tt-who { outline: 1.5px dashed rgba(0,113,22
 #chTip { position: fixed; z-index: 90; pointer-events: none; background: var(--card); border-radius: 12px; padding: 9px 12px; font-size: 12.5px; line-height: 1.5; box-shadow: 0 10px 30px rgba(0,0,0,.18), 0 0 0 1px var(--line); display: none; max-width: 300px; }
 #chTip.show { display: block; } #chTip .sw { margin-right: 6px; }
 @media (max-width: 860px) { .dgrid { grid-template-columns: 1fr; } .hm-row { grid-template-columns: 110px repeat(var(--n), minmax(16px, 1fr)) 50px; } }
+
+/* Task 8: keyboard focus */
+/* one clear ring for everything you can reach with Tab: solid blue, with a white gap so it also shows on blue/green buttons */
+:focus-visible,
+.btn:focus-visible, .seg button:focus-visible, .person:focus-visible, .billlink:focus-visible, .tpl:focus-visible, .chip:focus-visible,
+a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid #0071e3 !important; outline-offset: 2px; box-shadow: 0 0 0 2px #fff;
+}
+:focus:not(:focus-visible) { outline: none; }
+/* text boxes and dropdowns: ring sits on the border so it isn't clipped by panels */
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 0; }
+/* tabs and segment buttons sit close together: keep the ring tight and on top */
+.seg button:focus-visible { outline-offset: 0; position: relative; z-index: 1; }
+/* timetable blocks: on top of their neighbours, and override the dashed demo outline */
+.tt-b:focus-visible { outline-offset: 1px; z-index: 4; filter: brightness(1.06); }
+/* file pickers: the real input is visually hidden but still reachable with Tab; ring shows on its label */
+.vh { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+label.btn, label.drop { position: relative; }
+label.btn:has(input:focus-visible), label.drop:has(input:focus-visible) { outline: 3px solid #0071e3; outline-offset: 2px; }
