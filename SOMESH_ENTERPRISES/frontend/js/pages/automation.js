@@ -2,7 +2,7 @@
 "use strict";
 // ---------------------------------------------------------- admin: automation
 function viewAuto() {
-  const d = S.autoCfg; if (!d) return `<p class="empty">Loading…</p>`;
+  const d = S.autoCfg; if (!d) return hero("Automation", "") + skeleton("table", 4);
   const a = d.settings;
   const sw = (id, on, title, text) => `<label class="switch"><input type="checkbox" id="${id}" ${on ? "checked" : ""}><span><b>${title}</b><span class="muted small" style="display:block">${text}</span></span></label>`;
   return hero("Automation", "Let the app move work along on its own. Changes apply straight away.") +

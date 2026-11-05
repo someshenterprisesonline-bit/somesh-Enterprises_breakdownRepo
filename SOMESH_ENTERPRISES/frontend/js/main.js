@@ -9,6 +9,12 @@
   document.addEventListener("click", unlockAudio, { once: true });
   setInterval(ticker, 1000);
   $("#sheetBack").onclick = closeSheet;
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.billId && !$("#dlg").open) closeSheet(); });
+  // Esc: close the side panel; if none is open, hide pop-ups and alerts (an open dialog closes itself on Esc)
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || $("#dlg").open) return;
+    if ($("#sheet").classList.contains("open")) { closeSheet(); return; }
+    hideTip(); const ct = $("#chTip"); if (ct) ct.classList.remove("show");
+    if ($("#toasts").children.length) dismissAll();
+  });
   setInterval(() => { if (!S.user || (document.activeElement && document.activeElement.tagName === "INPUT")) return; if (["over", "pipe", "tracker", "dash"].includes(S.tab)) load(); else if (["mine", "check"].includes(S.tab)) render(); }, 30000);
 })();

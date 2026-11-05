@@ -39,8 +39,8 @@ function toast(a) {
   el.innerHTML = `<div class="h"><span class="ic">S</span><span>${APP}</span><i>now</i></div><b><span class="k"></span>${esc(a.title)}</b><p>${esc(a.body)}</p>
     <div class="actions"><button class="btn primary" type="button">Open</button><button class="btn" type="button">Dismiss</button></div>`;
   const [open, close] = el.querySelectorAll("button");
-  open.onclick = () => { el.remove(); S.tab = a.kind === "validate" ? "check" : "mine"; render(); };
-  close.onclick = () => el.remove();
+  open.onclick = () => { el.remove(); tidyToasts(); S.tab = a.kind === "validate" ? "check" : "mine"; render(); };
+  close.onclick = () => { el.remove(); tidyToasts(); };
   $("#toasts").prepend(el);
   setTimeout(() => { el.remove(); tidyToasts(); }, a.kind === "overdue" || a.kind === "rejected" ? 60000 : 20000);
   tidyToasts(true);
@@ -60,5 +60,12 @@ function tidyToasts(added) {
       more.onclick = () => { S.hidden = 0; more.remove(); S.tab = "alerts"; api("/api/alerts/read", {}).then(load); render(); }; }
     more.textContent = `+${S.hidden} more alert${S.hidden > 1 ? "s" : ""} · open Alerts`;
   } else if (more) more.remove();
+  // "Dismiss all" appears when 2 or more alerts are showing
+  const n = box.querySelectorAll(".toast").length; let all = box.querySelector(".clearall");
+  if (n >= 2 || (n && S.hidden > 0)) {
+    if (!all) { all = document.createElement("button"); all.className = "btn clearall"; all.type = "button"; all.onclick = dismissAll; box.prepend(all); }
+    all.textContent = `Dismiss all (${n + (S.hidden || 0)})`;
+  } else if (all) all.remove();
 }
+function dismissAll() { const box = $("#toasts"); box.querySelectorAll(".toast, .more, .clearall").forEach(x => x.remove()); S.hidden = 0; }
 function note(title, body, kind) { toast({ kind: kind || "rejected", title, body, id: Date.now() }); }

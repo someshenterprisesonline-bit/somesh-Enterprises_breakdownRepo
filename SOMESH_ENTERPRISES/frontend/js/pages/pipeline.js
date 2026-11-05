@@ -53,13 +53,14 @@ function lanesOf(blocks) {   // overlapping blocks (two tasks at once) go on sep
   return Math.max(1, ends.length);
 }
 function viewTimetable(views) {
-  const d = S.tt; if (!d) return hero("Pipeline", "") + views + `<p class="empty">Loading…</p>`;
+  const d = S.tt; if (!d) return hero("Pipeline", "") + views + skeleton("table", 7);
   const H = d.end_hour - d.start_hour, day0 = pts(d.date + " 00:00:00");
   const pos = (v) => Math.max(0, Math.min(100, ((pts(v) - day0) / 3600000 - d.start_hour) / H * 100));
   const qtxt = (S.ttq || "").toLowerCase(), dept = S.ttd || "";
   const depts = [...new Set(d.people.map(p => p.dept))];
   const people = d.people.filter(p => (!qtxt || (p.name + " " + p.dept + " " + p.blocks.map(b => b.task).join(" ")).toLowerCase().includes(qtxt)) && (!dept || p.dept === dept)
     && (!S.ttBusy || p.blocks.length || p.now || p.queued.length || p.waiting.length || p.docs.length));
+  const compact = store.get("se_tt_compact") === "1", LANE = compact ? 22 : 34, TOP = compact ? 5 : 10;   // row geometry
   const hours = Array.from({ length: H + 1 }, (_, i) => d.start_hour + i);
   const hourLbl = (h) => `${(h % 12) || 12}${h < 12 || h === 24 ? " AM" : " PM"}`;
   const head = `<div class="tt-row tt-head"><div class="tt-who"><b>${esc(new Date(day0).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }))}</b></div>
@@ -71,17 +72,18 @@ function viewTimetable(views) {
     : p.waiting.length ? `<span class="pill p-submitted">Waiting approval: ${esc(p.waiting[0].task)}</span>` : p.queued.length ? `<span class="pill p-assigned">${p.queued.length} up next</span>` : `<span class="muted small">Free</span>`;
   const rows = people.map(p => `<div class="tt-row" data-person="${esc(p.name)}"><div class="tt-who" title="${S.selTpl != null ? "Click to give the selected task" : "Drop a repeatable task here"}">${avatar(p.name)}<div style="min-width:0"><b>${esc(p.name)}</b><div class="muted small">${esc(p.dept)}</div><div style="margin-top:4px">${status(p)}</div></div>
       <div class="tt-tot">${d.today && p.now ? tick(p.seconds, d.server_now, "timer sm") : `<span class="timer sm">${clock(p.seconds)}</span>`}</div></div>
-    <div class="tt-track" style="--h:${H};min-height:${Math.max(64, 26 + lanesOf(p.blocks) * 34)}px">${lunch}${nowLine}${p.blocks.map(b => { const l = pos(b.start), w = Math.max(0.6, pos(b.end) - l);
+    <div class="tt-track" style="--h:${H};min-height:${compact ? Math.max(34, 12 + lanesOf(p.blocks) * LANE) : Math.max(64, 26 + lanesOf(p.blocks) * LANE)}px">${lunch}${nowLine}${p.blocks.map(b => { const l = pos(b.start), w = Math.max(0.6, pos(b.end) - l);
       const k = "tb" + (S.tipN = (S.tipN || 0) + 1); S.tips = S.tips || {}; S.tips[k] = { ...b, person: p.name };
-      return `<div class="tt-b ${cls(b.status)} ${b.demo ? "b-demo" : ""}" style="left:${l}%;width:max(14px, ${w}%);top:${10 + b.lane * 34}px" ${b.bill ? `data-bill="${esc(b.bill)}"` : /^TASK-/.test(b.code) ? `data-task="${b.task_id}"` : ""} data-tip="${k}" tabindex="0" aria-label="${esc(b.task + ", " + b.status)}"><span>${b.status === "Done" ? "✓ " : ""}${esc(b.task)}</span></div>`; }).join("")}
+      return `<div class="tt-b ${cls(b.status)} ${b.demo ? "b-demo" : ""}" style="left:${l}%;width:max(14px, ${w}%);top:${TOP + b.lane * LANE}px" ${b.bill ? `data-bill="${esc(b.bill)}"` : /^TASK-/.test(b.code) ? `data-task="${b.task_id}"` : ""} data-tip="${k}" tabindex="0" aria-label="${esc(b.task + ", " + b.status)}"><span>${b.status === "Done" ? "✓ " : ""}${esc(b.task)}</span></div>`; }).join("")}
       ${p.queued.length ? `<div class="tt-q" title="${esc(p.queued.map(x => x.code + " " + x.task).join(" · "))}">Up next: ${esc(p.queued.slice(0, 2).map(x => x.task).join(", "))}${p.queued.length > 2 ? ` +${p.queued.length - 2}` : ""}</div>` : ""}</div></div>`).join("");
   return hero("Pipeline", `Who is working on what, hour by hour. ${d.lunch ? "Lunch is shaded." : ""} Hover a block for details, click one to open it. Drag a repeatable task onto a person to give it.`,
       `<div class="daypick"><input class="in" type="date" id="ttDate" value="${esc(d.date)}" max="${today()}" style="width:auto"></div>`) + views +
     `<div class="toolbar"><input class="search" id="ttq" placeholder="Search person or task" value="${esc(S.ttq || "")}">
       <select class="in" id="ttd" style="width:auto"><option value="">All departments</option>${depts.map(x => `<option ${x === dept ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>
-      <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ttBusy" ${S.ttBusy ? "checked" : ""} style="accent-color:#0071e3"> Only people with tasks</label>${demoToggle()}</div>
+      <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ttBusy" ${S.ttBusy ? "checked" : ""} style="accent-color:#0071e3"> Only people with tasks</label>${demoToggle()}
+      <span style="flex:1"></span><div class="seg" role="group" aria-label="Row size">${[["0", "Comfortable"], ["1", "Compact"]].map(([v, l]) => `<button type="button" data-ttc="${v}" aria-pressed="${compact === (v === "1")}" aria-selected="${compact === (v === "1")}">${l}</button>`).join("")}</div></div>
     <div class="legend"><span class="tt-key b-run"></span> running <span class="tt-key b-wait"></span> waiting for approval <span class="tt-key b-docs"></span> approved – adding documents <span class="tt-key b-done"></span> finished <span class="tt-key b-back"></span> sent back <span class="tt-key tt-lk"></span> lunch${d.today ? ` <span style="display:inline-block;width:2px;height:12px;background:#ff3b30"></span> now` : ""}</div>
-    ${viewPalette()}<div class="panel tt">${head}${rows || `<p class="empty">Nobody matches.</p>`}</div>`;
+    ${viewPalette()}<div class="panel tt ${compact ? "compact" : ""}">${head}${rows || `<p class="empty">Nobody matches.</p>`}</div>`;
 }
 function viewBills(views) {
   const p = S.pipe; if (!p) return "";

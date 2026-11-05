@@ -13,7 +13,7 @@ function asgRow(i) {
     <td><select class="in" data-f="bill" aria-label="Bill (optional)"><option value="">No bill</option>${bills.map(b => `<option value="${esc(b.id)}">${esc(b.id)} · ${esc(b.client)}</option>`).join("")}</select></td></tr>`;
 }
 function viewAssign() {
-  const d = S.adhoc; if (!d) return `<p class="empty">Loading…</p>`;
+  const d = S.adhoc; if (!d) return hero("Assign tasks", "") + skeleton("table", 5);
   const rows = d.tasks.map(t => `<div class="row" style="grid-template-columns:110px 1fr 160px 260px"><span class="t">${esc(t.stage)}</span><span><b>${esc(t.stage_name)}</b><div class="muted small">${esc((t.assignee || t.owners.join(", ")))} → checked by ${esc(t.validator)}${t.bill_id ? " · " + esc(t.bill_id) : ""}</div></span>
     <span class="small">${t.status === "approved" ? "Done " + esc(fmt(t.decided_at)) : t.status === "submitted" ? "With checker" : isLate(t) ? `<span class="pill p-late">Overdue</span>` : "Due " + esc(fmt(t.due_at))}</span><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="pill p-${t.status === "approved" && t.adhoc && !t.ended_at ? "docs" : t.status}">${t.status === "approved" && t.adhoc ? (t.ended_at ? "Ended" : "Adding documents") : STATUS[t.status] || t.status}</span>${docsBtn("as" + t.id, `${t.stage} ${t.stage_name} · ${t.assignee || ""}`, t.files)}<button class="btn bad" type="button" data-deltask="${t.id}" style="padding:4px 12px;font-size:13px" aria-label="Delete ${esc(t.stage)}">Delete</button></span></div>`).join("");
   return hero("Assign tasks", "Give tasks directly. The person presses Start (timer runs), Done (sent to you), and after your approval uploads the documents and ends it before moving to the next task.") +

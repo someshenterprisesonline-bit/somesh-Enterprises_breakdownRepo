@@ -26,8 +26,8 @@ function viewDash() {
     <select class="in" id="dDept" style="width:auto"><option value="">All departments</option>${depts.map(d => `<option ${S.dDept === d ? "selected" : ""}>${esc(d)}</option>`).join("")}</select>
     <select class="in" id="dPerson" style="width:auto"><option value="">Everyone</option>${S.meta.users.filter(u => !S.dDept || u.dept === S.dDept).map(u => `<option ${S.dPerson === u.name ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select>
     ${D && D.has_demo ? `<label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-demo ${S.showDemo !== false ? "checked" : ""} style="accent-color:#0071e3"> Include demo data</label>` : ""}
-    <span style="flex:1"></span><button class="btn" type="button" id="dCsv">Export CSV</button></div>`;
-  if (!D) return hero("Dashboard", "Loading…") + filters;
+    <span style="flex:1"></span><button class="btn" type="button" id="dCsv">Export CSV</button><button class="btn" type="button" id="dPrint">Print / Save PDF</button></div>`;
+  if (!D) return hero("Dashboard", "") + filters + skeleton("chart", 240);
   const ppl = D.people.filter(p => (!S.dDept || p.dept === S.dDept) && (!S.dPerson || p.name === S.dPerson));
   const act = ppl.filter(p => p.worked > 0);
   const worked = ppl.reduce((a, p) => a + p.worked, 0), avail = act.reduce((a, p) => a + p.available, 0), idle = act.reduce((a, p) => a + p.idle, 0);
@@ -44,7 +44,8 @@ function viewDash() {
     <div class="kpi red"><span>Late / sent back</span><b>${late} / ${rework}</b><small class="muted">tasks past limit / reworks</small></div>
     <div class="kpi purple"><span>Time-limit gaps</span><b>${over.length + gen.length}</b><small class="muted">${over.length} over · ${gen.length} too generous</small></div></div>`;
   const empty = !worked ? `<div class="emptycard" style="margin-top:16px;padding:36px">No timer records in this period${S.dDept ? " for " + esc(S.dDept) : ""}. Records appear as people press Start on tasks.</div>` : "";
-  return hero("Dashboard", `${range} · how the team's working time was spent, and where the gaps are`) + filters + tiles + empty + (worked ? `
+  const printHead = `<div class="printhead"><b>${APP} · Dashboard</b><span>${range}${S.dDept ? " · " + esc(S.dDept) : ""}${S.dPerson ? " · " + esc(S.dPerson) : ""} · printed ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}</span></div>`;
+  return printHead + hero("Dashboard", `${range} · how the team's working time was spent, and where the gaps are`) + filters + tiles + empty + (worked ? `
     <div class="dgrid">
       <div class="panel span2"><h3>Hours worked per day</h3><p class="muted small">Stacked by department. Hover a bar for the split.</p>${chartDaily(D, ppl)}</div>
       <div class="panel span2"><h3>Day by day, per person</h3><p class="muted small">Darker = more hours. Hover a cell for the exact time.</p>${chartHeat(D, act)}</div>
@@ -152,6 +153,7 @@ function wireDash() {
   $("#dDept").onchange = (e) => { S.dDept = e.target.value; S.dPerson = ""; render(); };
   $("#dPerson").onchange = (e) => { S.dPerson = e.target.value; render(); };
   $("#dCsv").onclick = dashCsv;
+  $("#dPrint").onclick = () => { hideTip(); const ct = $("#chTip"); if (ct) ct.classList.remove("show"); window.print(); };
 }
 // one tooltip for every chart: any element with data-ct
 function chartTip(e) {

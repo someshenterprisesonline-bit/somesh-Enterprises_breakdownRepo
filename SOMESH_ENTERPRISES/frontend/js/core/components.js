@@ -1,5 +1,13 @@
 // Shared pieces: task card, file list, documents panel, preview, page header (hero), bill detail sheet.
 "use strict";
+// Grey shimmering placeholders shown while a page's data loads. kind: "cards" | "table" | "chart"
+function skeleton(kind, n) {
+  const line = (w) => `<span class="sk-line" style="width:${w}%"></span>`;
+  if (kind === "table") return `<div class="panel skel" aria-busy="true" aria-label="Loading">${Array.from({ length: n || 6 }, (_, i) => `<div class="sk-row">${line(18)}${line(34)}${line(12)}${line(14)}</div>`).join("")}</div>`;
+  if (kind === "chart") return `<div class="kpis skel" aria-busy="true" aria-label="Loading">${Array.from({ length: 4 }, () => `<div class="kpi">${line(60)}<span class="sk-block" style="height:34px;width:50%"></span></div>`).join("")}</div>
+    <div class="panel skel" style="margin-top:16px">${line(30)}<span class="sk-block" style="height:${n || 220}px;margin-top:14px"></span></div>`;
+  return `<div class="grid skel" aria-busy="true" aria-label="Loading">${Array.from({ length: n || 3 }, () => `<div class="card">${line(40)}${line(75)}${line(55)}<span class="sk-block" style="height:36px;width:45%;border-radius:980px"></span></div>`).join("")}</div>`;
+}
 function taskCard(t, mode) {
   const ins = t.inputs.length ? `<div class="box"><b>From the previous team</b>${t.inputs.map(i => `<div>${esc(i.stage)} ${esc(i.name)} · ${esc(i.by || "")}: ${esc(i.note || "")}${i.files && i.files.length ? fileList(i.files) : i.link ? `<div class="mono">${esc(i.link)}</div>` : ""}</div>`).join("")}</div>` : "";
   const canAttach = mode !== "check" && t.assignee === S.user && S.meta.storage && (t.adhoc ? t.status === "approved" : t.status === "in_progress");
@@ -72,7 +80,7 @@ function closeSheet() { S.billId = null; S.bill = null; $("#sheet").classList.re
 function drawSheet() {
   const el = $("#sheet"); el.classList.add("open"); $("#sheetBack").classList.add("open"); el.setAttribute("aria-hidden", "false");
   const d = S.bill;
-  if (!d) { el.innerHTML = `<p class="empty">Loading…</p>`; return; }
+  if (!d) { el.innerHTML = skeleton("table", 8); return; }
   if (d.error) { el.innerHTML = `<button class="btn" id="shX" type="button">Close</button><p class="empty">${esc(d.error)}</p>`; $("#shX").onclick = closeSheet; return; }
   const b = d.bill, byCode = Object.fromEntries(d.tasks.map(t => [t.stage, t])), opt = optionalStages();
   const order = S.meta.stages.filter(s => !opt.has(s.code) || byCode[s.code]);
