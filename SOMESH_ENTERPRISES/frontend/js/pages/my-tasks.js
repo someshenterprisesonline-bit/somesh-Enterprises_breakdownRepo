@@ -1,7 +1,7 @@
 // Pages: My tasks (staff + admins) and To check (approvers).
 "use strict";
 function viewMine() {
-  const st = S.state; if (!st) return `<p class="empty">Loading…</p>`;
+  const st = S.state; if (!st) return hero("Hello", "") + skeleton("cards");
   const running = st.mine.filter(t => t.status === "in_progress"), docs = st.mine.filter(t => t.status === "approved"),
         waiting = st.mine.filter(t => t.status === "submitted"), next = st.mine.filter(t => t.status === "assigned");
   const L = st.lunch || S.meta.lunch || {};

@@ -2,7 +2,7 @@
 "use strict";
 // ---------------------------------------------------------- overview (leads / CEO)
 function viewOverview() {
-  const p = S.pipe; if (!p) return `<p class="empty">Loading…</p>`;
+  const p = S.pipe; if (!p) return hero("Overview", "") + skeleton("chart", 180);
   const open = pBills().filter(b => b.status !== "complete"), done = pBills().filter(b => b.status === "complete");
   const cells = open.flatMap(b => Object.entries(b.cells).map(([code, c]) => ({ ...c, code, bill: b })));
   const active = cells.filter(c => c.status !== "approved"), late = active.filter(c => c.late), checking = active.filter(c => c.status === "submitted");

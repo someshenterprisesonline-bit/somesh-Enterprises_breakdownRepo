@@ -1,5 +1,6 @@
 // App shell: sign-in, tabs (incl. optional tabs), header, render() which draws the current page and wires its buttons.
 "use strict";
+const APP_VERSION = "v2.0";   // shown under the title on the sign-in screen
 // ---------------------------------------------------------- admin: optional tabs (hidden until added, remembered per admin on this PC)
 const OPTIONAL_TABS = [["guide", "Walkthrough", "How the process works, step by step"], ["store", "Storage", "Master Tracker, Contract Register, Vault"],
                        ["admin", "New bill", "Open bills, and the demo controls"], ["input", "Workflow input", "Load or change the workflow from Excel / Google Sheets"]];
@@ -40,11 +41,11 @@ function signIn(name) {
 }
 function render() {
   const app = $("#app");
-  if (!S.meta) { app.innerHTML = `<p class="empty">Loading…</p>`; return; }
+  if (!S.meta) { app.innerHTML = `<main>${skeleton("cards")}</main>`; return; }
   if (!S.user) {
     const depts = [...new Set(S.meta.users.map(u => u.dept))];
     const lq = (S.uq || "").toLowerCase(), match = (u) => !lq || (u.name + " " + u.role + " " + u.dept).toLowerCase().includes(lq);
-    app.innerHTML = `<div class="login"><div class="logo mark">S</div><h1>${APP}</h1><p class="lead">Monthly Cycle · pick your name to see your tasks and alerts.</p>
+    app.innerHTML = `<div class="login"><div class="logo mark">S</div><h1>${APP}</h1><div class="ver">${APP_VERSION}</div><p class="lead">Monthly Cycle · pick your name to see your tasks and alerts.</p>
       <input class="search" id="uq" placeholder="Type your name" value="${esc(S.uq || "")}" aria-label="Find your name" style="max-width:360px;margin-bottom:6px">
       ${depts.filter(d => S.meta.users.some(u => u.dept === d && match(u))).map(d => `<h3 class="dept">${esc(d)}</h3><div class="people">${S.meta.users.filter(u => u.dept === d && match(u)).map(u => `<button class="person" data-user="${esc(u.name)}" type="button">${avatar(u.name)}<span><b>${esc(u.name)}</b><small>${esc(u.role)}</small></span></button>`).join("")}</div>`).join("")}</div>`;
     const uq = $("#uq"); uq.oninput = () => { S.uq = uq.value; render(); const n = $("#uq"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
@@ -64,8 +65,8 @@ function render() {
   const ae = document.activeElement, keep = ae && ["loc", "pq", "lq", "tq", "ttq", "dFrom", "dTo"].includes(ae.id) ? { id: ae.id, v: ae.value, s: ae.selectionStart } : null;
   const focus = null;
   app.innerHTML = `<header><div class="bar"><div class="brand"><div class="logo">S</div><div><b style="display:flex;align-items:center;gap:8px">${APP}<i id="dot" class="dot ${S.es && S.es.readyState === 1 ? "on" : ""}" title="Live connection"></i></b></div></div>
-      <button class="btn" id="snd" type="button" aria-pressed="${S.sound}" title="Alert sound">${S.sound ? "🔊" : "🔇"}</button>
-      ${!isAdmin() ? `<button class="btn" id="help" type="button" title="How it works">?</button>` : ""}<button class="btn bell" id="bell" type="button" aria-label="Alerts">🔔${st.unread ? `<b>${st.unread}</b>` : ""}</button>
+      <button class="btn" id="snd" type="button" aria-pressed="${S.sound}" title="Alert sound" aria-label="Alert sound">${S.sound ? "🔊" : "🔇"}</button>
+      ${!isAdmin() ? `<button class="btn" id="help" type="button" title="How it works" aria-label="How it works">?</button>` : ""}<button class="btn bell" id="bell" type="button" aria-label="Alerts${st.unread ? `, ${st.unread} unread` : ""}">🔔${st.unread ? `<b>${st.unread}</b>` : ""}</button>
       <div class="me">${avatar(S.user)}<b class="small">${esc(S.user)}</b><button class="btn ghost" id="logout" type="button">Switch</button></div></div>
     ${tabs.length > 1 ? `<div class="tabsWrap"><div class="seg" role="tablist">${tabs.map(([k, l, n]) => `<button role="tab" aria-selected="${S.tab === k}" data-tab="${k}">${l}${n ? `<span class="n">${n}</span>` : ""}</button>`).join("")}${isAdmin() ? `<button type="button" id="moreTabs" title="Add or remove tabs" aria-label="Add or remove tabs" style="font-size:15px">＋</button>` : ""}</div></div>` : ""}${isAdmin() && lunchNow() ? `<div class="lunchbar">Lunch break: staff are locked and timers are paused until ${ampm((S.meta.lunch || {}).end || "14:00")}</div>` : ""}</header>
     <main>${body}</main>`;
@@ -82,7 +83,8 @@ function render() {
   hideTip(); app.querySelectorAll("[data-tip]").forEach(el => { el.onmouseenter = el.onfocus = () => showTip(el); el.onmouseleave = el.onblur = hideTip; });
   const ttd = $("#ttd"); if (ttd) ttd.onchange = () => { S.ttd = ttd.value; render(); };
   const ttB = $("#ttBusy"); if (ttB) ttB.onchange = () => { S.ttBusy = ttB.checked; render(); };
-  app.querySelectorAll("[data-tab]").forEach(b => b.onclick = async () => { S.tab = b.dataset.tab; if (S.tab === "alerts") api("/api/alerts/read", {}).then(load); if (S.tab === "input") { try { S.wf = await api("/api/workflow"); } catch (e) {} } if (S.tab === "store") { try { S.st = await api("/api/storage"); } catch (e) {} } if (S.tab === "assign") { try { S.adhoc = await api("/api/adhoc"); } catch (e) {} } if (S.tab === "auto") { try { S.autoCfg = await api("/api/automation"); } catch (e) {} } if (S.tab === "tracker") { try { S.tr = await api(trUrl()); } catch (e) {} } if (S.tab === "pipe") { try { S.tt = await api(ttUrl()); if (!S.tpls) S.tpls = (await api("/api/templates")).templates; } catch (e) {} } if (S.tab === "dash") { render(); try { S.dash = await api(dashUrl()); } catch (e) {} } render(); });
+  app.querySelectorAll("[data-ttc]").forEach(b => b.onclick = () => { store.set("se_tt_compact", b.dataset.ttc); render(); });
+  app.querySelectorAll("[data-tab]").forEach(b => b.onclick = async () => { S.tab = b.dataset.tab; render(); if (S.tab === "alerts") api("/api/alerts/read", {}).then(load); if (S.tab === "input") { try { S.wf = await api("/api/workflow"); } catch (e) {} } if (S.tab === "store") { try { S.st = await api("/api/storage"); } catch (e) {} } if (S.tab === "assign") { try { S.adhoc = await api("/api/adhoc"); } catch (e) {} } if (S.tab === "auto") { try { S.autoCfg = await api("/api/automation"); } catch (e) {} } if (S.tab === "tracker") { try { S.tr = await api(trUrl()); } catch (e) {} } if (S.tab === "pipe") { try { S.tt = await api(ttUrl()); if (!S.tpls) S.tpls = (await api("/api/templates")).templates; } catch (e) {} } if (S.tab === "dash") { render(); try { S.dash = await api(dashUrl()); } catch (e) {} } render(); });
   $("#logout").onclick = logout;
   $("#snd").onclick = () => { S.sound = !S.sound; store.set("se_sound", S.sound ? "on" : "off"); unlockAudio(); if (S.sound) beep(); render(); };
   $("#bell").onclick = () => { if (isAdmin()) { S.tab = "alerts"; api("/api/alerts/read", {}).then(load); render(); return; }
@@ -92,11 +94,11 @@ function render() {
   app.querySelectorAll("[data-docs]").forEach(b => b.onclick = () => showDocs(b.dataset.docs));
   app.querySelectorAll("[data-act]").forEach(b => b.onclick = () => act(b.dataset.act, Number(b.dataset.id)));
   if (S.tab === "admin") wireAdmin();
-  if (S.tab === "input" && isAdmin()) wireInput();
-  if (S.tab === "store") wireStore();
-  if (S.tab === "assign") wireAssign();
-  if (S.tab === "tracker") wireTracker();
-  if (S.tab === "auto") wireAuto();
+  if (S.tab === "input" && isAdmin() && S.wf) wireInput();
+  if (S.tab === "store" && S.st) wireStore();
+  if (S.tab === "assign" && S.adhoc) wireAssign();   // pages are wired only once their data has loaded
+  if (S.tab === "tracker" && S.tr) wireTracker();
+  if (S.tab === "auto" && S.autoCfg) wireAuto();
   if (S.tab === "pipe" && isAdmin()) { wirePalette(); const hd = app.querySelector("header"); if (hd) document.documentElement.style.setProperty("--hdr", hd.offsetHeight + "px"); }
   if (S.tab === "dash") wireDash();
   app.querySelectorAll("[data-deltask]").forEach(b => b.onclick = () => { const t = ((S.adhoc || {}).tasks || []).find(x => x.id === Number(b.dataset.deltask)); if (t) deleteTask(t); });

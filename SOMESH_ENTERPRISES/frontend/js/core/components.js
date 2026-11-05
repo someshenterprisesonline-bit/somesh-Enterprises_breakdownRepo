@@ -1,11 +1,19 @@
 // Shared pieces: task card, file list, documents panel, preview, page header (hero), bill detail sheet.
 "use strict";
+// Grey shimmering placeholders shown while a page's data loads. kind: "cards" | "table" | "chart"
+function skeleton(kind, n) {
+  const line = (w) => `<span class="sk-line" style="width:${w}%"></span>`;
+  if (kind === "table") return `<div class="panel skel" aria-busy="true" aria-label="Loading">${Array.from({ length: n || 6 }, (_, i) => `<div class="sk-row">${line(18)}${line(34)}${line(12)}${line(14)}</div>`).join("")}</div>`;
+  if (kind === "chart") return `<div class="kpis skel" aria-busy="true" aria-label="Loading">${Array.from({ length: 4 }, () => `<div class="kpi">${line(60)}<span class="sk-block" style="height:34px;width:50%"></span></div>`).join("")}</div>
+    <div class="panel skel" style="margin-top:16px">${line(30)}<span class="sk-block" style="height:${n || 220}px;margin-top:14px"></span></div>`;
+  return `<div class="grid skel" aria-busy="true" aria-label="Loading">${Array.from({ length: n || 3 }, () => `<div class="card">${line(40)}${line(75)}${line(55)}<span class="sk-block" style="height:36px;width:45%;border-radius:980px"></span></div>`).join("")}</div>`;
+}
 function taskCard(t, mode) {
   const ins = t.inputs.length ? `<div class="box"><b>From the previous team</b>${t.inputs.map(i => `<div>${esc(i.stage)} ${esc(i.name)} · ${esc(i.by || "")}: ${esc(i.note || "")}${i.files && i.files.length ? fileList(i.files) : i.link ? `<div class="mono">${esc(i.link)}</div>` : ""}</div>`).join("")}</div>` : "";
   const canAttach = mode !== "check" && t.assignee === S.user && S.meta.storage && (t.adhoc ? t.status === "approved" : t.status === "in_progress");
   const own = mode !== "check" && (t.files.length || canAttach) ? `<div class="box"><b>${t.adhoc ? "Documents" : "Your files"}${t.accept.length ? ` <span class="muted small" style="font-weight:500">· accepts ${esc(t.accept.join(", "))}</span>` : ""}${t.file_required || (t.adhoc && t.needs_docs) ? ` <span class="pill p-soon" style="font-size:11px">required</span>` : ""}</b>
       ${t.files.length ? fileList(t.files, canAttach ? t.id : 0) : `<div class="muted small">No files attached yet.</div>`}
-      ${canAttach ? `<label class="btn" style="margin-top:8px;display:inline-block;cursor:pointer">＋ Attach files<input type="file" multiple hidden data-attach="${t.id}" ${t.accept.length ? `accept="${esc(t.accept.map(a => "." + a).join(","))}"` : ""}></label>` : ""}</div>` : "";
+      ${canAttach ? `<label class="btn" style="margin-top:8px;display:inline-block;cursor:pointer">＋ Attach files<input type="file" multiple class="vh" data-attach="${t.id}" ${t.accept.length ? `accept="${esc(t.accept.map(a => "." + a).join(","))}"` : ""}></label>` : ""}</div>` : "";
   const back = t.decision_note && t.status === "in_progress" && t.rework_count ? `<div class="back"><b>Sent back:</b> ${esc(t.decision_note)}</div>` : "";
   let acts = "";
   if (mode === "check") acts = `<button class="btn good" data-act="approve" data-id="${t.id}">Approve &amp; hand over</button><button class="btn bad" data-act="reject" data-id="${t.id}">Send back</button>`;
@@ -31,7 +39,7 @@ function fileList(files, removeFor) {
 }
 S.docs = {};
 const docsBtn = (key, title, files) => { if (!files || !files.length) return ""; S.docs[key] = { title, files };
-  return `<button class="btn" type="button" data-docs="${esc(key)}" style="padding:4px 12px;font-size:13px" title="View or download">📄 ${files.length}</button>`; };
+  return `<button class="btn" type="button" data-docs="${esc(key)}" style="padding:4px 12px;font-size:13px" title="View or download" aria-label="Documents: ${files.length} file${files.length === 1 ? "" : "s"}">📄 ${files.length}</button>`; };
 function showDocs(key) {
   const d = S.docs[key]; if (!d) return;
   sheetHtml(`<div class="code">DOCUMENTS</div><h2 style="margin:2px 0 4px">${esc(d.title)}</h2><p class="muted small">${d.files.length} file${d.files.length === 1 ? "" : "s"} · open to view, preview spreadsheets, or download.${isAdmin() ? " Downloading also saves a copy in the storage folder, by department and person." : ""}</p>
@@ -72,7 +80,7 @@ function closeSheet() { S.billId = null; S.bill = null; $("#sheet").classList.re
 function drawSheet() {
   const el = $("#sheet"); el.classList.add("open"); $("#sheetBack").classList.add("open"); el.setAttribute("aria-hidden", "false");
   const d = S.bill;
-  if (!d) { el.innerHTML = `<p class="empty">Loading…</p>`; return; }
+  if (!d) { el.innerHTML = skeleton("table", 8); return; }
   if (d.error) { el.innerHTML = `<button class="btn" id="shX" type="button">Close</button><p class="empty">${esc(d.error)}</p>`; $("#shX").onclick = closeSheet; return; }
   const b = d.bill, byCode = Object.fromEntries(d.tasks.map(t => [t.stage, t])), opt = optionalStages();
   const order = S.meta.stages.filter(s => !opt.has(s.code) || byCode[s.code]);

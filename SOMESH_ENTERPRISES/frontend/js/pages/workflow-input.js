@@ -36,7 +36,7 @@ function viewInput() {
         <select class="in" id="mins" style="flex:0 0 auto;min-width:0;width:auto">${[[0, "Off"], [5, "Every 5 min"], [15, "Every 15 min"], [60, "Every hour"]].map(([v, l]) => `<option value="${v}" ${v === mins ? "selected" : ""}>${l}</option>`).join("")}</select>
         <span style="flex:1"></span><button class="btn" id="locCheck" type="button">Check</button><button class="btn primary" id="locApply" type="button" ${pend && pend.kind === "loc" && pend.ok ? "" : "disabled"}>Apply</button></div></div>
     <div class="panel"><h3>2b · Upload from this computer</h3><p class="muted small">Pick the filled-in .xlsx (from Excel, or Google Sheets → File → Download → .xlsx).</p>
-      <label class="drop" id="drop"><input type="file" id="file" accept=".xlsx" hidden><span id="fileName">${pend && pend.name ? esc(pend.name) : "Drop the .xlsx here or click to choose"}</span></label>
+      <label class="drop" id="drop"><input type="file" id="file" accept=".xlsx" class="vh"><span id="fileName">${pend && pend.name ? esc(pend.name) : "Drop the .xlsx here or click to choose"}</span></label>
       <div class="row2" style="margin-top:10px"><span style="flex:1"></span><button class="btn" id="upCheck" type="button">Check</button><button class="btn primary" id="upApply" type="button" ${pend && pend.kind === "up" && pend.ok ? "" : "disabled"}>Apply</button></div></div>
   </div>
   <label class="panel" style="margin-top:16px;display:flex;gap:12px;align-items:flex-start;cursor:pointer">

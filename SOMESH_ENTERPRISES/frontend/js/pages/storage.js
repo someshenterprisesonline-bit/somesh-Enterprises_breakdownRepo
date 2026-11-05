@@ -2,7 +2,7 @@
 "use strict";
 // ---------------------------------------------------------- storage (Data Center)
 function viewStore() {
-  const d = S.st; if (!d) return `<p class="empty">Loading…</p>`;
+  const d = S.st; if (!d) return hero("Storage", "") + skeleton("table", 6);
   if (!d.enabled) return hero("Storage", "") + `<div class="emptycard">Storage is turned off in config.json (storage.enabled).</div>`;
   const files = d.tree.filter(f => !f.dir);
   const trackers = files.filter(f => f.path.startsWith("01 Master Tracker/") && f.name.endsWith(".xlsx")).sort((a, b) => b.name.localeCompare(a.name));
