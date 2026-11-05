@@ -330,3 +330,54 @@ th[aria-sort="ascending"] .arr, th[aria-sort="descending"] .arr { color: var(--b
 .tt.compact .tt-who b { font-size: 13px; } .tt.compact .tt-tot { top: 5px; } .tt.compact .tt-tot .timer.sm { font-size: 12px; }
 .tt.compact .tt-b { height: 18px; font-size: 11px; border-radius: 5px; padding: 0 6px; }
 .tt.compact .tt-q { font-size: 10px; bottom: 1px; }
+
+/* Alerts cards */
+.al-wrap { --al-c: var(--faint); }
+.al-markrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.al-bar { display: grid; gap: 10px; margin-bottom: 18px; }
+.al-people { display: flex; gap: 8px; align-items: center; overflow-x: auto; padding: 4px 2px 8px; scrollbar-width: thin; }
+.al-dept { flex: none; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-left: 8px; }
+.al-chip { flex: none; display: inline-flex; align-items: center; gap: 8px; border: 0; background: var(--card); border-radius: 980px; padding: 4px 12px 4px 4px; font-size: 13px; font-weight: 600; color: var(--fg);
+  box-shadow: 0 0 0 1px var(--line), 0 2px 6px rgba(0,0,0,.06); white-space: nowrap; transition: box-shadow .12s, transform .12s; }
+.al-chip .avatar { width: 26px; height: 26px; font-size: 11px; }
+.al-chip:hover { transform: translateY(-1px); box-shadow: 0 0 0 1px var(--line), 0 6px 14px rgba(0,0,0,.1); }
+.al-chip[aria-pressed="true"] { background: var(--blue-soft); color: var(--blue); box-shadow: 0 0 0 2px var(--blue); }
+.al-all { background: var(--fg); font-size: 9px !important; }
+.al-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.al-seg { display: flex; flex-wrap: wrap; }
+.al-seg button[aria-pressed="true"] { background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 3px 8px rgba(0,0,0,.06); }
+.al-c { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 9px; background: rgba(118,118,128,.16); font-size: 11px; font-weight: 700; color: var(--muted); text-align: center; }
+.al-seg button[aria-pressed="true"] .al-c { background: var(--blue); color: #fff; }
+.al-cards { display: grid; gap: 10px; }
+.al-day { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 14px 0 0; text-shadow: none; }
+.al-day:first-child { margin-top: 0; }
+/* card: coloured left edge + a text label for the type (never colour alone) */
+.al-card { --al-c: var(--faint); background: var(--card); border-radius: 16px; padding: 12px 16px 12px 18px; box-shadow: var(--shadow); border-left: 5px solid var(--al-c); display: grid; gap: 4px; min-width: 0; }
+.al-card.unread { background: #f4f8fe; }
+.al-check { --al-c: var(--purple); } .al-new { --al-c: var(--blue); } .al-approved { --al-c: var(--green); }
+.al-back { --al-c: var(--red); } .al-overdue { --al-c: var(--orange); } .al-other { --al-c: #8e8e93; }
+.al-top { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+.al-type { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--al-c); }
+.al-other .al-type { color: var(--muted); }
+.al-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 3px rgba(0,113,227,.18); flex: none; }
+.al-time { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.al-n { background: var(--card2); color: var(--fg); border-radius: 980px; padding: 1px 8px; font-size: 12px; font-weight: 700; }
+.al-title { font-size: 15px; overflow-wrap: anywhere; }
+.al-body { font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.al-more { justify-self: start; font-size: 13px; }
+.al-list { list-style: none; margin: 2px 0 0; padding: 8px 12px; background: var(--card2); border-radius: 10px; display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.al-list li { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.al-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.al-btn { padding: 6px 14px; font-size: 13px; }
+.al-empty { padding: 32px 20px; display: grid; justify-items: center; gap: 6px; }
+.al-empty b { color: var(--fg); font-size: 16px; }
+.al-ok { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--green-soft); color: var(--green); font-weight: 800; font-size: 20px; }
+/* bell side panel: a bit tighter */
+#sheet .al-card { box-shadow: 0 0 0 1px var(--line), 0 2px 8px rgba(0,0,0,.06); }
+@media (max-width: 480px) {
+  .al-card { padding: 12px 14px 12px 14px; }
+  .al-seg { width: 100%; }
+  .al-seg button { flex: 1 1 auto; min-height: 44px; }
+  .al-chip, .al-btn, .al-more { min-height: 44px; }
+  .al-acts .btn { flex: 1 1 auto; }
+}
