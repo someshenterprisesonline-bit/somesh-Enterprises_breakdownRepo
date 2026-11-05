@@ -23,7 +23,7 @@ Frontend paths are under `frontend/`. Backend functions are in `backend/app.py` 
 | **Alerts** (and the 🔔 bell) | everyone | `js/pages/activity-alerts.js`, bell in `js/core/shell.js` | `viewAlerts` | `GET /api/state`, `POST /api/alerts/read` | `alert`, `send_email`, `send_ntfy`, `send_webhooks` |
 | **Assign tasks** | admins | `js/pages/assign-tasks.js` | `viewAssign`, `asgRow`, `wireAssign` | `GET /api/adhoc`, `POST /api/assign` | `create_adhoc`, `adhoc_busy` |
 | Admin task panel (click a task block or row: details, documents, Delete) | admins | `js/pages/task-panel.js` | `openTask`, `deleteTask`, `deleteBill`, `downloadDocs`, `fileCopy` | `POST /api/admin-task/<id>/delete`, `/api/admin-task/<id>/file`, `/api/bill/<id>/delete` | `delete_task`, `delete_bill`, `file_task_docs` |
-| **Automation** | admins | `js/pages/automation.js` | `viewAuto`, `wireAuto` | `GET/POST /api/automation`, `POST /api/automation/open-now` | `auto_cfg`, `auto_start`, `automation_loop`, `open_bills_for_contracts`, `remind_loop_once` |
+| **Automation** (views: Workflow model · Rules · History · Settings, in `S.autoView`) | admins | `js/pages/automation.js` | `viewAuto`, `wireAuto`, `loadAuto`; model `auModelHtml`, `auLayout`, `auStagePanel`; rules `auRulesHtml`, `auSentence`, `RULE_TEMPLATES`; builder `rbOpen`, `rbHtml`, `rbSave`; `auHistoryHtml`, `auSettingsHtml` | `GET/POST /api/automation`, `POST /api/automation/open-now`, plus the rules APIs below | `auto_cfg`, `auto_start`, `automation_loop`, `open_bills_for_contracts`, `remind_loop_once` |
 | **Walkthrough** (optional tab; also the "?" guide for staff) | everyone | `js/pages/walkthrough.js` | `viewGuide` | `GET /api/meta` | (none) |
 | **Storage** (optional for admins; always shown to Data Center) | admins, Data Center | `js/pages/storage.js` | `viewStore`, `wireStore` | `GET /api/storage`, `POST /api/storage/sync`, `GET /files/...` | `storage_sync`, `storage_archive`, `storage_contract_check`; **`backend/storage.py`** builds the Excel files and folders |
 | **New bill** + demo controls (optional tab) | admins | `js/pages/new-bill-demo.js` | `viewAdmin`, `wireAdmin` | `POST /api/bills`, `/api/demo/reset`, `/api/demo/simulate`, `/api/demo/clear` | `new_bill`, `create_task`, `load_demo`, `_build_demo`, `_demo_history`, `simulate_step`, `clear_demo` |
@@ -32,7 +32,7 @@ Frontend paths are under `frontend/`. Backend functions are in `backend/app.py` 
 | Documents panel, file preview | admins | `js/core/components.js` | `showDocs`, `fileList`, `docsBtn`, `showPreview` | `GET /files/...`, `/api/preview` | `preview`, `task_files` |
 | Optional-tab menu (the ＋ button) | admins | `js/core/shell.js` | `tabMenu`, `OPTIONAL_TABS`, `shownTabs` | (none; remembered in the browser) | (none) |
 | Lunch lock screen | staff | `index.html` (`#lunch`), `js/core/utils.js` | `lunchWin`, `lunchNow`, `ticker` | `POST /api/tasks/...` refused at lunch | `is_lunch`, `lunch_window` |
-| Automation **rules** (When → If → Then; backend only so far) | admins | (UI comes in part 2) | | `GET /api/rules`, `POST /api/rules`, `POST /api/rules/<id>/toggle`, `/delete`, `/test`, `GET /api/rules/log?limit=50`, `GET /api/workflow-model` | see **Automation rules** below |
+| Automation **rules** (When → If → Then) | admins | `js/pages/automation.js` (Rules view and the builder side panel) | | `GET /api/rules`, `POST /api/rules`, `POST /api/rules/<id>/toggle`, `/delete`, `/test`, `GET /api/rules/log?limit=50`, `GET /api/workflow-model` | see **Automation rules** below |
 
 ## Automation rules (backend/app.py)
 

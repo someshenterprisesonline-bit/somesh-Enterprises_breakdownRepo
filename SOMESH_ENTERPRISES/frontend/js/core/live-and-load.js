@@ -20,7 +20,7 @@ async function load() {
   if (!S.user) return render();
   try { [S.state, S.pipe] = await Promise.all([api("/api/state"), isAdmin() ? api("/api/pipeline") : Promise.resolve(null)]); } catch (e) { console.error(e); }
   if (S.tab === "assign") { try { S.adhoc = await api("/api/adhoc"); } catch (e) {} }
-  if (S.tab === "auto") { try { S.autoCfg = await api("/api/automation"); } catch (e) {} }
+  if (S.tab === "auto") await loadAuto();
   if (S.tab === "tracker") { try { S.tr = await api(trUrl()); } catch (e) {} }
   if (S.tab === "pipe" && (S.pv || "time") === "time") { try { S.tt = await api(ttUrl()); if (!S.tpls) S.tpls = (await api("/api/templates")).templates; } catch (e) {} }
   if (S.tab === "dash") { try { S.dash = await api(dashUrl()); } catch (e) {} }
