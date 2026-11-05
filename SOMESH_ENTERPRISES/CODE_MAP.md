@@ -32,6 +32,24 @@ Frontend paths are under `frontend/`. Backend functions are in `backend/app.py` 
 | Documents panel, file preview | admins | `js/core/components.js` | `showDocs`, `fileList`, `docsBtn`, `showPreview` | `GET /files/...`, `/api/preview` | `preview`, `task_files` |
 | Optional-tab menu (the ＋ button) | admins | `js/core/shell.js` | `tabMenu`, `OPTIONAL_TABS`, `shownTabs` | (none; remembered in the browser) | (none) |
 | Lunch lock screen | staff | `index.html` (`#lunch`), `js/core/utils.js` | `lunchWin`, `lunchNow`, `ticker` | `POST /api/tasks/...` refused at lunch | `is_lunch`, `lunch_window` |
+| Automation **rules** (When → If → Then; backend only so far) | admins | (UI comes in part 2) | | `GET /api/rules`, `POST /api/rules`, `POST /api/rules/<id>/toggle`, `/delete`, `/test`, `GET /api/rules/log?limit=50`, `GET /api/workflow-model` | see **Automation rules** below |
+
+## Automation rules (backend/app.py)
+
+Admins make rules: **When** something happens (a trigger), **If** the conditions match, **Then** do one or more actions in order.
+
+- **Tables:** `rules` (`trigger`, `conditions` JSON with the trigger's own value under `when`, `actions` JSON, `enabled`) and `rule_runs` (one row per firing or error). Both are in `SCHEMA`, so old databases upgrade by themselves. `seed_rules` adds 3 example rules, switched **off**, the first time the `rules` table is created.
+- **Lists of choices:** `TRIGGERS`, `CONDITIONS`, `ACTIONS` and `PLACEHOLDERS` (`{task} {person} {bill} {client} {dept} {minutes}`).
+- **Engine:** `fire_rules(trigger, task=None, bill_id=None, extra=None)` is called by `create_task` and `create_adhoc` (assigned, and started if Auto-start started it), `claim`, `submit`, `approve` (including bill complete), `reject`, `end_task` and `new_bill`. `rules_tick` checks the time-based triggers (`task_overdue`, `task_not_started`, `daily_at`) from `automation_loop` every 30 s.
+- **Helpers:** `rule_ctx` collects the facts, `rule_matches` checks the If part, `run_action` does one Then step, and `rule_move` / `least_busy` hand a task to someone else. `auto_start(tid, force=True)` starts a task even when the Auto-start setting is off.
+- **Safety:**
+  - Each rule runs inside `try`, so a broken rule only writes an `error` row in `rule_runs`.
+  - A rule fires at most once per task (or per bill, or per day for `daily_at`).
+  - Actions done by a rule never fire rules again (`RULE_CTX.on`).
+  - Demo bills are skipped unless the rule has `include_demo`.
+  - Every firing writes a `rule_runs` row and an Activity event "Rule '…' …".
+- **API helpers:** `validate_rule` and `save_rule` (clear `FlowError` messages), `rule_test` (dry run over the last 7 days; it changes nothing), `rules_meta` (everything a rule editor needs) and `workflow_model` (stages, live counts, and the rules that apply to each stage).
+- `wipe_all` (used by `--demo`) clears `rule_runs`, because task IDs start again from 1. The rules themselves stay.
 
 ## Shared files ⚠ (talk before changing)
 

@@ -72,13 +72,32 @@ CREATE TABLE IF NOT EXISTS work_log (id INTEGER PRIMARY KEY AUTOINCREMENT, task_
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS adhoc (code TEXT PRIMARY KEY, def TEXT, created_by TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, user TEXT, kind TEXT, title TEXT, body TEXT, task_id INTEGER, bill_id TEXT, read INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS rules (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, enabled INTEGER DEFAULT 0, trigger TEXT,
+  conditions TEXT, actions TEXT, created_by TEXT, created_at TEXT);
+CREATE TABLE IF NOT EXISTS rule_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER, ts TEXT, task_id INTEGER, bill_id TEXT, result TEXT, detail TEXT);
 """
 def connect():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     c = sqlite3.connect(DB_PATH, check_same_thread=False)
     c.row_factory = sqlite3.Row
+    had_rules = c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='rules'").fetchone()
     c.executescript(SCHEMA); migrate(c)
+    if not had_rules: seed_rules(c)   # first run only: example rules, switched off
     return c
+def seed_rules(c):
+    by = next((u["name"] for u in USERS if u.get("admin")), "")
+    examples = [
+        ("Overdue 2 h in any team → alert admins", "task_overdue", {"when": {"minutes": 120}},
+         [{"type": "alert", "to": "admins", "message": "{task} for {bill} ({client}) is {minutes} min past its time limit. With: {person}."}]),
+        ("Not started after 1 h → start for the least busy person", "task_not_started", {"when": {"hours": 1}},
+         [{"type": "start_automatically"}]),
+        ("Bill complete → give 'Courier dispatch' to the Operations team", "bill_completed", {},
+         [{"type": "give_template", "template": "Courier dispatch", "to": "dept:Operations"}]),
+    ]
+    for name, trig, cond, acts in examples:
+        c.execute("INSERT INTO rules (name,enabled,trigger,conditions,actions,created_by,created_at) VALUES (?,?,?,?,?,?,?)",
+                  (name, 0, trig, json.dumps(cond), json.dumps(acts), by, ts()))
+    c.commit()
 def migrate(c):
     have = {r[1] for r in c.execute("PRAGMA table_info(bills)")}
     for col in ("contract_no", "contract_status", "vault_folder"):
@@ -385,6 +404,7 @@ def end_task(tid, actor):
     n = len(task_files(t))
     log(t["bill_id"] or None, tid, "ended", actor, f"{actor} ended {stage_label(t['stage'])}" + (f" with {n} document{'s' if n != 1 else ''}" if n else ""))
     alert([d.get("given_by") or t["validator"]], "complete", f"Task ended: {d['name']}", f"{actor} ended {t['stage']} {d['name']}" + (f" and uploaded {n} document{'s' if n != 1 else ''}." if n else "."), get_task(tid))
+    fire_rules("task_ended", t)
     if auto_cfg().get("auto_start"):   # line up the next one straight away
         nxt = next((n_ for n_ in q("SELECT * FROM tasks WHERE stage LIKE 'TASK-%' AND status='assigned' ORDER BY id") if actor in json.loads(n_["owners"])), None)
         if nxt:
@@ -670,15 +690,18 @@ def create_task(bill_id, code, actor="System"):
     else:
         alert(s["owners"] + s.get("cc", []), "new_task", f"New task: {stage_label(code)}", body, t)
         log(bill_id, tid, "assigned", actor, f"{stage_label(code)} assigned to {', '.join(s['owners'])}")
+    fire_rules("task_assigned", t)
+    if started: fire_rules("task_started", t)
     return tid
 
 # ------------------------------------------------------------------ automation
 def auto_cfg():
     return CONFIG.setdefault("automation", {"auto_start": False, "remind_every_hours": 0, "escalate_to_admins": False,
                                             "monthly_open_day": 0, "monthly_open_hour": 9, "last_monthly_open": ""})
-def auto_start(tid):
-    """Automation: start a new task straight away for the owner with the fewest tasks in progress."""
-    if not auto_cfg().get("auto_start"): return None
+def auto_start(tid, force=False):
+    """Automation: start a new task straight away for the owner with the fewest tasks in progress.
+    force=True is used by a rule's "start automatically" action, even when the Auto-start setting is off."""
+    if not force and not auto_cfg().get("auto_start"): return None
     t = get_task(tid); owners = json.loads(t["owners"])
     if not owners: return None
     if is_tracked_adhoc(t):
@@ -714,6 +737,8 @@ def automation_loop():
                 alert(admins(), "complete", "Monthly bills opened", f"Automation opened {len(opened)} bills for active contracts.")
         except Exception as e:
             print("automation failed:", e)
+        try: rules_tick()          # time-based rules: overdue, not started, every day at
+        except Exception as e: print("rules check failed:", e)
 
 # ------------------------------------------------------------------ tasks the admin gives directly
 def create_adhoc(title, owners, validator, hours, output, actor, bill_id="", dept="", needs_docs=False):
@@ -739,6 +764,8 @@ def create_adhoc(title, owners, validator, hours, output, actor, bill_id="", dep
     body = f"{actor} gave you: {d['name']}." + (f" Bill {bill_id}." if bill_id else "") + f" Time limit {hours:g} h. Checker: {validator}."
     alert([started] if started else owners, "new_task", f"New task from {actor}: {d['name']}", body, t)
     log(bill_id or None, tid, "assigned", actor, f"{actor} gave {code} {d['name']} to {', '.join([started] if started else owners)}")
+    fire_rules("task_assigned", t)
+    if started: fire_rules("task_started", t)
     return code
 
 def next_codes(t):
@@ -767,6 +794,7 @@ def new_bill(client, actor):
     log(bill_id, None, "bill", actor, f"{bill_id} opened for {client}")
     storage_contract_check(bill_id, client)
     create_task(bill_id, FLOW["start_stage"], actor)
+    fire_rules("bill_opened", bill_id=bill_id)
     return bill_id
 
 def claim(tid, actor):
@@ -782,6 +810,7 @@ def claim(tid, actor):
     if others:
         for o in others: push(o, {"type": "refresh"})
     log(t["bill_id"], tid, "started", actor, f"{actor} started {stage_label(t['stage'])}")
+    fire_rules("task_started", t)
 
 def submit(tid, actor, note="", link="", branch=None):
     t = get_task(tid); s = sdef(t["stage"])
@@ -797,6 +826,7 @@ def submit(tid, actor, note="", link="", branch=None):
     timer_stop(tid)
     log(t["bill_id"], tid, "submitted", actor, f"{actor} submitted {stage_label(t['stage'])} for checking" + (f" (new candidates: {branch})" if branch else ""))
     t = get_task(tid)
+    fire_rules("task_submitted", t)
     if t["validator"] == actor:   # e.g. CEO approval: the owner is also the checker
         approve(tid, actor, "Self-approved")
     else:
@@ -813,6 +843,7 @@ def approve(tid, actor, note=""):
         alert([t["assignee"]], "approved", f"Approved: {stage_label(t['stage'])}",
               (f"{actor} approved it. Upload the documents and press End task to move on." if s.get("adhoc") else f"{actor} approved your work on {t['bill_id']}. A copy goes to the next team."), get_task(tid))
     t = get_task(tid)
+    fire_rules("task_approved", t)
     for code in next_codes(t):
         ok, wait = ready(t["bill_id"], code)
         if ok: create_task(t["bill_id"], code, actor)
@@ -823,6 +854,7 @@ def approve(tid, actor, note=""):
         storage_archive(t["bill_id"])
         if setting("complete_to_admins"): alert([u["name"] for u in USERS if u.get("admin")], "complete", f"Bill complete: {t['bill_id']}",
               f"{t['bill_id']} went through every stage and is in the Vault.", t)
+        fire_rules("bill_completed", t, bill_id=t["bill_id"])
 
 def reject(tid, actor, note=""):
     t = get_task(tid); s = sdef(t["stage"])
@@ -833,6 +865,7 @@ def reject(tid, actor, note=""):
     if t["assignee"]: timer_start(tid, t["assignee"])
     log(t["bill_id"], tid, "rejected", actor, f"{actor} sent {stage_label(t['stage'])} back: {note}")
     alert([t["assignee"]], "rejected", f"Rework: {stage_label(t['stage'])}", f"{actor}: {note}", get_task(tid))
+    fire_rules("task_sent_back", t)
 
 # ------------------------------------------------------------------ overdue watcher
 def overdue_loop():
@@ -867,6 +900,370 @@ def remind_loop_once():
         else:
             who = [t["assignee"]] if t["assignee"] else json.loads(t["owners"])
             alert(who, "overdue", f"Reminder - overdue: {stage_label(t['stage'])}", f"{t['bill_id'] or 'This task'} is still overdue.", t)
+
+# ------------------------------------------------------------------ automation rules: When -> If -> Then
+# A rule is stored in the rules table: trigger (one of TRIGGERS), conditions JSON (the If part, plus "when" = the
+# trigger's own value such as {"minutes": 120}), and actions JSON (the Then part, run in order).
+# fire_rules() is called from the workflow (claim, submit, approve, ...) and from automation_loop for the time-based
+# triggers. It never raises: a broken rule is written to rule_runs as an error and the normal workflow carries on.
+TRIGGERS = {   # id -> (label, scope, value the trigger needs)
+    "task_assigned": ("A task is assigned", "task", None),
+    "task_started": ("A task is started", "task", None),
+    "task_submitted": ("A task is submitted for checking", "task", None),
+    "task_approved": ("A task is approved", "task", None),
+    "task_sent_back": ("A task is sent back", "task", None),
+    "task_ended": ("A task given by an admin is ended", "task", None),
+    "task_overdue": ("A task is overdue", "task", {"key": "minutes", "label": "minutes past the limit", "type": "number", "default": 0}),
+    "task_not_started": ("A task is not started", "task", {"key": "hours", "label": "hours since assigned", "type": "number", "default": 1}),
+    "bill_opened": ("A bill is opened", "bill", None),
+    "bill_completed": ("A bill is complete", "bill", None),
+    "daily_at": ("Every day at", "time", {"key": "at", "label": "time (HH:MM)", "type": "time", "default": "09:00"}),
+}
+CONDITIONS = {   # id -> (label, type, which trigger scopes it makes sense for)
+    "dept": ("Department is", "dept", ("task",)),
+    "person": ("Person is", "person", ("task",)),
+    "task_contains": ("Task name contains", "text", ("task",)),
+    "stage": ("Stage code is", "stage", ("task",)),
+    "client_contains": ("Client contains", "text", ("task", "bill")),
+    "rework_min": ("Sent back at least N times", "number", ("task",)),
+    "include_demo": ("Include demo data", "bool", ("task", "bill", "time")),
+}
+ACTIONS = {   # id -> (label, params, needs a task)
+    "alert": ("Send an alert", ["to", "message"], False),
+    "reassign_least_busy": ("Move it to the least busy person in the same department", [], True),
+    "reassign_to": ("Move it to a person", ["person"], True),
+    "escalate_admins": ("Escalate to the admins", [], True),
+    "give_template": ("Give a repeatable task", ["template", "to"], False),
+    "extend_limit": ("Extend the time limit", ["hours"], True),
+    "start_automatically": ("Start it for the least busy owner", [], True),
+}
+PLACEHOLDERS = ("task", "person", "bill", "client", "dept", "minutes")
+RULE_CTX = threading.local()   # .on is True while a rule's actions run, so they don't fire rules again
+
+def depts():
+    return list(dict.fromkeys(u.get("dept", "") for u in USERS if u.get("dept")))
+def rule_row(r):
+    cond = json.loads(r["conditions"] or "{}")
+    return {"id": r["id"], "name": r["name"], "enabled": bool(r["enabled"]), "trigger": r["trigger"], "when": cond.pop("when", {}) or {},
+            "conditions": cond, "actions": json.loads(r["actions"] or "[]"), "created_by": r["created_by"], "created_at": r["created_at"]}
+def validate_rule(b):
+    """Check a rule from the API and return the cleaned version. Raises FlowError with a clear message."""
+    name = str(b.get("name") or "").strip()
+    if not name: raise FlowError("Give the rule a name")
+    if len(name) > 80: raise FlowError("Keep the rule name under 80 characters")
+    trig = b.get("trigger")
+    if trig not in TRIGGERS: raise FlowError(f"Unknown trigger '{trig}'. Pick one of: {', '.join(TRIGGERS)}")
+    scope, need = TRIGGERS[trig][1], TRIGGERS[trig][2]
+    when = {}
+    if need:
+        raw = (b.get("when") or {}).get(need["key"], need["default"])
+        if need["type"] == "time":
+            try: datetime.strptime(str(raw), "%H:%M")
+            except ValueError: raise FlowError("The daily time must look like 09:30")
+            when["at"] = str(raw)
+        else:
+            try: v = float(raw); assert v >= 0
+            except Exception: raise FlowError(f"'{need['label']}' must be a number of 0 or more")
+            if need["key"] == "hours" and v <= 0: raise FlowError("'hours since assigned' must be more than 0")
+            when[need["key"]] = v
+    cond = {}
+    for k, v in (b.get("conditions") or {}).items():
+        if v in (None, "", False) and k != "include_demo": continue
+        if k not in CONDITIONS: raise FlowError(f"Unknown condition '{k}'. Use: {', '.join(CONDITIONS)}")
+        label, typ, scopes = CONDITIONS[k]
+        if scope not in scopes and not (k == "include_demo"):
+            raise FlowError(f"'{label}' doesn't apply to '{TRIGGERS[trig][0]}': that trigger has no {'task' if scope == 'bill' else 'task or bill'}")
+        if typ == "dept":
+            if v not in depts(): raise FlowError(f"There is no department called '{v}'. Departments: {', '.join(depts())}")
+        elif typ == "person":
+            if v not in USER_NAMES: raise FlowError(f"There is nobody called '{v}' in the people list")
+        elif typ == "stage":
+            v = str(v).strip().upper()
+            if v not in STAGES and not re.fullmatch(r"TASK-\d{3,}", v): raise FlowError(f"There is no stage '{v}'. Use a code like {ORDER[0] if ORDER else 'S01'} or TASK-001")
+        elif typ == "number":
+            try: v = int(v); assert v >= 0
+            except Exception: raise FlowError(f"'{label}' must be a whole number of 0 or more")
+        elif typ == "bool": v = bool(v)
+        else:
+            v = str(v).strip()[:80]
+            if not v: continue
+        cond[k] = v
+    acts = b.get("actions") or []
+    if not isinstance(acts, list) or not acts: raise FlowError("Add at least one action (the Then part)")
+    if len(acts) > 10: raise FlowError("Use 10 actions or fewer in one rule")
+    clean = []
+    for i, a in enumerate(acts, 1):
+        typ = (a or {}).get("type")
+        if typ not in ACTIONS: raise FlowError(f"Action {i}: unknown action '{typ}'. Use: {', '.join(ACTIONS)}")
+        label, _, needs_task = ACTIONS[typ]
+        if needs_task and scope != "task": raise FlowError(f"Action {i} ('{label}') needs a task, but '{TRIGGERS[trig][0]}' has none")
+        c = {"type": typ}
+        if typ == "alert":
+            to = str(a.get("to") or "").strip(); c["to"] = check_target(to, i, allow=("assignee", "approver", "admins", "department:", "person:"))
+            if to in ("assignee", "approver") and scope != "task": raise FlowError(f"Action {i}: '{to}' needs a task, but '{TRIGGERS[trig][0]}' has none")
+            msg = str(a.get("message") or "").strip()
+            if not msg: raise FlowError(f"Action {i}: write the alert message")
+            bad = [p for p in re.findall(r"\{(\w+)\}", msg) if p not in PLACEHOLDERS]
+            if bad: raise FlowError(f"Action {i}: unknown placeholder {{{bad[0]}}}. You can use " + " ".join("{" + p + "}" for p in PLACEHOLDERS))
+            c["message"] = msg[:500]
+        elif typ == "reassign_to":
+            p = str(a.get("person") or "").strip()
+            if p not in USER_NAMES: raise FlowError(f"Action {i}: there is nobody called '{p}' to move the task to")
+            c["person"] = p
+        elif typ == "give_template":
+            name_ = str(a.get("template") or "").strip()
+            if not any(t["name"] == name_ for t in templates()):
+                raise FlowError(f"Action {i}: there is no repeatable task called '{name_}'. Repeatable tasks: {', '.join(t['name'] for t in templates())}")
+            c["template"] = name_
+            to = str(a.get("to") or "").strip().replace("department:", "dept:")
+            if to.startswith("person:") and to[7:] in USER_NAMES: c["to"] = to
+            elif to.startswith("dept:") and to[5:] in depts(): c["to"] = to
+            else: raise FlowError(f"Action {i}: give it to 'person:<name>' or 'dept:<department>' (got '{to or 'nothing'}')")
+        elif typ == "extend_limit":
+            try: h = float(a.get("hours")); assert 0 < h <= 1000
+            except Exception: raise FlowError(f"Action {i}: extend the limit by a number of hours above 0")
+            c["hours"] = h
+        clean.append(c)
+    return {"name": name, "trigger": trig, "when": when, "conditions": cond, "actions": clean}
+def check_target(to, i, allow):
+    if to in ("assignee", "approver", "admins"): return to
+    if to.startswith("department:"):
+        if to[11:] not in depts(): raise FlowError(f"Action {i}: there is no department called '{to[11:]}'")
+        return to
+    if to.startswith("person:"):
+        if to[7:] not in USER_NAMES: raise FlowError(f"Action {i}: there is nobody called '{to[7:]}'")
+        return to
+    raise FlowError(f"Action {i}: send the alert to assignee, approver, admins, department:<name> or person:<name> (got '{to or 'nothing'}')")
+def save_rule(b, actor):
+    r = validate_rule(b); rid = b.get("id")
+    cond = json.dumps(dict(r["conditions"], when=r["when"])); acts = json.dumps(r["actions"])
+    if rid:
+        if not q("SELECT id FROM rules WHERE id=?", (rid,)): raise FlowError("That rule no longer exists")
+        x("UPDATE rules SET name=?, trigger=?, conditions=?, actions=?, enabled=? WHERE id=?",
+          (r["name"], r["trigger"], cond, acts, 1 if b.get("enabled") else 0, rid))
+        log(None, None, "rule", actor, f"{actor} changed rule '{r['name']}'")
+    else:
+        rid = x("INSERT INTO rules (name,enabled,trigger,conditions,actions,created_by,created_at) VALUES (?,?,?,?,?,?,?)",
+                (r["name"], 1 if b.get("enabled") else 0, r["trigger"], cond, acts, actor, ts()))
+        log(None, None, "rule", actor, f"{actor} created rule '{r['name']}'")
+    return rule_row(q("SELECT * FROM rules WHERE id=?", (rid,))[0])
+
+def rule_ctx(task=None, bill_id=None, extra=None):
+    """The facts a rule looks at: task, person, department, bill, client, demo, minutes past the limit."""
+    t = task or {}; bill_id = bill_id or t.get("bill_id") or None
+    s = sdef(t["stage"]) if t.get("stage") else {}
+    owners = json.loads(t["owners"]) if t.get("owners") else []
+    b = q("SELECT client, demo FROM bills WHERE id=?", (bill_id,)) if bill_id else []
+    mins = ""
+    if t.get("due_at"):
+        late = (now() - datetime.strptime(t["due_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
+        if late > 0: mins = str(int(late * (DEMO_SPEED if b and b[0]["demo"] else max(1, speed())) // 60))   # in "work" minutes
+    c = {"task": stage_label(t["stage"]) if t.get("stage") else "", "task_name": s.get("name", ""), "stage": t.get("stage", ""),
+         "person": t.get("assignee") or ", ".join(owners), "assignee": t.get("assignee") or "", "owners": owners,
+         "approver": t.get("validator") or "", "dept": s.get("dept", ""), "bill": bill_id or "", "client": b[0]["client"] if b else "",
+         "demo": bool(b and b[0]["demo"]), "rework": int(t.get("rework_count") or 0), "minutes": mins}
+    c.update(extra or {}); return c
+def rule_matches(cond, c):
+    if c["demo"] and not cond.get("include_demo"): return False
+    if cond.get("dept") and cond["dept"].lower() != (c["dept"] or "").lower(): return False
+    if cond.get("person") and not (c["assignee"] == cond["person"] or (not c["assignee"] and cond["person"] in c["owners"])): return False
+    if cond.get("task_contains") and cond["task_contains"].lower() not in (c["task_name"] + " " + c["task"]).lower(): return False
+    if cond.get("stage") and cond["stage"].upper() != (c["stage"] or "").upper(): return False
+    if cond.get("client_contains") and cond["client_contains"].lower() not in (c["client"] or "").lower(): return False
+    if cond.get("rework_min") and c["rework"] < int(cond["rework_min"]): return False
+    return True
+def rule_text(msg, c):
+    return re.sub(r"\{(\w+)\}", lambda m: str(c.get(m.group(1), "")) or "-", msg)
+def rule_targets(to, c):
+    if to == "assignee": return [c["assignee"]] if c["assignee"] else c["owners"]
+    if to == "approver": return [c["approver"]] if c["approver"] else []
+    if to == "admins": return admins()
+    if to.startswith("department:"): return [u["name"] for u in USERS if u.get("dept") == to[11:]]
+    if to.startswith("person:"): return [to[7:]]
+    return []
+def rule_move(t, who, why):
+    """Hand a task to someone else (rule actions). Returns a short description."""
+    if t["status"] not in ("assigned", "in_progress"): return f"left {t['stage']} with {t['assignee'] or 'its owners'} (it is {t['status']})"
+    if t["assignee"] == who: return f"{who} already has it"
+    if t["status"] == "in_progress":
+        timer_stop(t["id"]); x("UPDATE tasks SET assignee=?, owners=? WHERE id=?", (who, json.dumps([who]), t["id"])); timer_start(t["id"], who)
+    else:
+        x("UPDATE tasks SET owners=? WHERE id=?", (json.dumps([who]), t["id"]))
+    nt = get_task(t["id"])
+    alert([who], "new_task", f"Task moved to you: {stage_label(t['stage'])}", f"{why} moved {stage_label(t['stage'])}" + (f" for {t['bill_id']}" if t["bill_id"] else "") + " to you.", nt)
+    return f"moved {t['stage']} to {who}"
+def least_busy(dept, exclude=None, adhoc_task=None):
+    people = [u["name"] for u in USERS if u.get("dept") == dept and u["name"] != exclude]
+    if adhoc_task: people = [p for p in people if not adhoc_busy(p, adhoc_task)]
+    if not people: return None
+    load = {p: q("SELECT COUNT(*) n FROM tasks WHERE status='in_progress' AND assignee=?", (p,))[0]["n"] for p in people}
+    return min(people, key=lambda p: (load[p], people.index(p)))
+def run_action(a, rule, t, c):
+    """Do one action. t is the task row (or None). Returns a short text for the log."""
+    why = f"Rule '{rule['name']}'"; typ = a["type"]
+    if typ == "alert":
+        to = rule_targets(a["to"], c)
+        if not to: return f"no one to alert ({a['to']})"
+        alert(to, "rule", rule["name"], rule_text(a["message"], c), t or ({"id": None, "bill_id": c["bill"]} if c["bill"] else None), demo=c["demo"])
+        return f"alerted {', '.join(dict.fromkeys(to))}"
+    if typ == "escalate_admins":
+        alert(admins(), "overdue", f"Escalated: {c['task']}", f"{why}: {c['task']}" + (f" for {c['bill']} ({c['client']})" if c["bill"] else "") + f" is with {c['person'] or 'nobody'}" + (f", {c['minutes']} min past its limit" if c["minutes"] else "") + ".", t, demo=c["demo"])
+        return "escalated to the admins"
+    if typ == "reassign_least_busy":
+        who = least_busy(c["dept"], exclude=t["assignee"], adhoc_task=t["id"] if is_tracked_adhoc(t) else None)
+        return rule_move(t, who, why) if who else f"nobody else free in {c['dept'] or 'the department'}"
+    if typ == "reassign_to": return rule_move(t, a["person"], why)
+    if typ == "extend_limit":
+        if t["status"] not in ("assigned", "in_progress", "submitted"): return f"{t['stage']} is already {t['status']}"
+        scale = DEMO_SPEED if c["demo"] else max(1, speed())
+        due = datetime.strptime(t["due_at"], "%Y-%m-%d %H:%M:%S") + timedelta(seconds=a["hours"] * 3600 / scale)
+        x("UPDATE tasks SET due_at=?, overdue_alerted=0 WHERE id=?", (ts(due), t["id"]))
+        return f"extended the time limit by {a['hours']:g} h"
+    if typ == "start_automatically":
+        if t["status"] != "assigned": return f"{t['stage']} was already {t['status']}"
+        who = auto_start(t["id"], force=True)
+        if not who: return "nobody free to start it"
+        alert([who], "new_task", f"Task started for you: {stage_label(t['stage'])}", f"{why} started it for you. Your timer is running.", get_task(t["id"]))
+        return f"started it for {who}"
+    if typ == "give_template":
+        tpl = next((x_ for x_ in templates() if x_["name"] == a["template"]), None)
+        if not tpl: raise FlowError(f"the repeatable task '{a['template']}' no longer exists")
+        to = a["to"]; owners = [to[7:]] if to.startswith("person:") else [u["name"] for u in USERS if u.get("dept") == to[5:]]
+        by = rule["created_by"] if rule["created_by"] in USER_NAMES else (admins() or [""])[0]
+        bill = c["bill"] if c["bill"] and q("SELECT id FROM bills WHERE id=?", (c["bill"],)) else ""
+        code = create_adhoc(tpl["name"], owners, by, tpl["hours"], tpl.get("about", ""), by, bill, to[5:] if to.startswith("dept:") else "", tpl.get("docs"))
+        return f"gave {code} {tpl['name']} to {to.replace('dept:', 'anyone in ').replace('person:', '')}"
+    raise FlowError(f"unknown action {typ}")
+def rule_already(rule_id, scope, task_id, bill_id):
+    if scope == "task": return bool(q("SELECT 1 FROM rule_runs WHERE rule_id=? AND task_id=? LIMIT 1", (rule_id, task_id)))
+    if scope == "bill": return bool(q("SELECT 1 FROM rule_runs WHERE rule_id=? AND bill_id=? AND task_id IS NULL LIMIT 1", (rule_id, bill_id)))
+    return bool(q("SELECT 1 FROM rule_runs WHERE rule_id=? AND ts LIKE ? LIMIT 1", (rule_id, now().strftime("%Y-%m-%d") + "%")))
+def fire_rules(trigger, task=None, bill_id=None, extra=None, only=None):
+    """Run every enabled rule for this trigger. Never raises. only = a list of rules (used by the time-based check)."""
+    if getattr(RULE_CTX, "on", False): return 0     # actions done by a rule don't trigger rules again
+    fired = 0
+    try:
+        rules = only if only is not None else q("SELECT * FROM rules WHERE enabled=1 AND trigger=? ORDER BY id", (trigger,))
+        if not rules: return 0
+        scope = TRIGGERS[trigger][1]
+        t = get_task(task["id"]) if task and task.get("id") else None    # fresh row
+        c = rule_ctx(t, bill_id, extra); bid = c["bill"] or None
+        for r in rules:
+            rr = rule_row(r); tid = t["id"] if (t and scope == "task") else None
+            try:
+                if rule_already(r["id"], scope, tid, bid): continue
+                if not rule_matches(rr["conditions"], c): continue
+                RULE_CTX.on = True
+                try: done = [run_action(a, rr, get_task(t["id"]) if t else None, c) for a in rr["actions"]]
+                finally: RULE_CTX.on = False
+                detail = "; ".join(done); fired += 1
+                x("INSERT INTO rule_runs (rule_id,ts,task_id,bill_id,result,detail) VALUES (?,?,?,?,?,?)", (r["id"], ts(), tid, bid, "fired", detail))
+                log(bid, tid, "rule", "Automation", f"Rule '{r['name']}' " + (f"on {c['task']}: " if c["task"] else (f"on {bid}: " if bid else ": ")) + detail)
+            except Exception as e:
+                RULE_CTX.on = False
+                print(f"rule {r['id']} failed:", repr(e))
+                try: x("INSERT INTO rule_runs (rule_id,ts,task_id,bill_id,result,detail) VALUES (?,?,?,?,?,?)", (r["id"], ts(), tid, bid, "error", str(e)[:300]))
+                except Exception: pass
+    except Exception as e:
+        print("rules failed:", repr(e))
+    return fired
+def rules_tick():
+    """Time-based triggers, checked from automation_loop: task_overdue, task_not_started, daily_at."""
+    rules = q("SELECT * FROM rules WHERE enabled=1 AND trigger IN ('task_overdue','task_not_started','daily_at') ORDER BY id")
+    if not rules: return
+    n = now(); open_tasks = None
+    for r in rules:
+        when = json.loads(r["conditions"] or "{}").get("when") or {}
+        if r["trigger"] == "daily_at":
+            if n.strftime("%H:%M") >= when.get("at", "09:00"): fire_rules("daily_at", only=[r])
+            continue
+        if open_tasks is None: open_tasks = q("SELECT * FROM tasks WHERE status IN ('assigned','in_progress')")
+        demo = demo_ids()
+        for t in open_tasks:
+            scale = DEMO_SPEED if t["bill_id"] in demo else max(1, speed())
+            if r["trigger"] == "task_overdue":
+                due = datetime.strptime(t["due_at"], "%Y-%m-%d %H:%M:%S") + timedelta(seconds=float(when.get("minutes") or 0) * 60 / scale)
+                if n < due: continue
+            else:
+                if t["status"] != "assigned": continue
+                since = datetime.strptime(t["created_at"], "%Y-%m-%d %H:%M:%S") + timedelta(seconds=float(when.get("hours") or 1) * 3600 / scale)
+                if n < since: continue
+            fire_rules(r["trigger"], t, only=[r])
+def rule_test(rid):
+    """Dry run: how often would this rule have fired in the last 7 days? Does NOT do any action."""
+    r = q("SELECT * FROM rules WHERE id=?", (rid,))
+    if not r: raise FlowError("That rule no longer exists")
+    rr = rule_row(r[0]); trig = rr["trigger"]; since = now() - timedelta(days=7); hits = []
+    kinds = {"task_assigned": ("assigned",), "task_started": ("started",), "task_submitted": ("submitted",), "task_approved": ("approved",),
+             "task_sent_back": ("rejected",), "task_ended": ("ended",), "bill_opened": ("bill",), "bill_completed": ("complete",)}
+    def add(key, when, c, text):
+        if key in seen: return
+        seen.add(key); hits.append({"ts": when, "task": c["task"], "person": c["person"], "bill": c["bill"], "client": c["client"], "text": text})
+    seen = set()
+    if trig in kinds:
+        for e in q(f"SELECT * FROM events WHERE ts >= ? AND kind IN ({','.join('?' * len(kinds[trig]))}) ORDER BY id DESC", (ts(since),) + kinds[trig]):
+            t = q("SELECT * FROM tasks WHERE id=?", (e["task_id"],)) if e["task_id"] else []
+            if TRIGGERS[trig][1] == "task" and not t: continue
+            c = rule_ctx(t[0] if t else None, e["bill_id"])
+            if rule_matches(rr["conditions"], c): add(e["task_id"] if TRIGGERS[trig][1] == "task" else e["bill_id"], e["ts"], c, e["text"])
+    elif trig in ("task_overdue", "task_not_started"):
+        demo = demo_ids()
+        for t in q("SELECT * FROM tasks WHERE created_at >= ? ORDER BY id DESC", (ts(since),)):
+            scale = DEMO_SPEED if t["bill_id"] in demo else max(1, speed())
+            if trig == "task_overdue":
+                limit = datetime.strptime(t["due_at"], "%Y-%m-%d %H:%M:%S") + timedelta(seconds=float(rr["when"].get("minutes") or 0) * 60 / scale)
+                done = t["submitted_at"] or t["decided_at"] or ts()
+                if datetime.strptime(done, "%Y-%m-%d %H:%M:%S") < limit: continue
+                when, text = ts(limit), f"{stage_label(t['stage'])} went {rr['when'].get('minutes', 0):g} min past its limit"
+            else:
+                limit = datetime.strptime(t["created_at"], "%Y-%m-%d %H:%M:%S") + timedelta(seconds=float(rr["when"].get("hours") or 1) * 3600 / scale)
+                started = t["claimed_at"] or ts()
+                if datetime.strptime(started, "%Y-%m-%d %H:%M:%S") < limit: continue
+                when, text = ts(limit), f"{stage_label(t['stage'])} was not started {rr['when'].get('hours', 1):g} h after it was assigned"
+            c = rule_ctx(t)
+            if rule_matches(rr["conditions"], c): add(t["id"], when, c, text)
+    elif trig == "daily_at":
+        at = rr["when"].get("at", "09:00")
+        for i in range(7, -1, -1):
+            d = (now() - timedelta(days=i)).strftime("%Y-%m-%d")
+            if d + " " + at + ":00" <= ts() and d + " " + at + ":00" >= ts(since): add(d, f"{d} {at}:00", rule_ctx(), f"Every day at {at}")
+    hits.sort(key=lambda h: h["ts"], reverse=True)
+    return {"rule": rr["name"], "would_fire": len(hits), "examples": hits[:5], "days": 7,
+            "note": "Checked against the last 7 days with each task's current details. Nothing was changed."}
+def workflow_model(demo=False):
+    """Stages with their links, live counts and the rules that apply to each stage."""
+    skip = set() if demo else demo_ids(); cur = ts()
+    open_ = [t for t in q("SELECT * FROM tasks WHERE status IN ('assigned','in_progress','submitted')") if t["bill_id"] not in skip]
+    rules = [rule_row(r) for r in q("SELECT * FROM rules ORDER BY id")]
+    out = []
+    for s in FLOW["stages"]:
+        mine = [t for t in open_ if t["stage"] == s["code"]]
+        applies = []
+        for r in rules:
+            if TRIGGERS.get(r["trigger"], ("", ""))[1] != "task": continue
+            cnd = r["conditions"]
+            if cnd.get("stage") and cnd["stage"] != s["code"]: continue
+            if cnd.get("dept") and cnd["dept"].lower() != s.get("dept", "").lower(): continue
+            if cnd.get("person") and cnd["person"] not in s.get("owners", []): continue
+            if cnd.get("task_contains") and cnd["task_contains"].lower() not in (s["code"] + " " + s["name"]).lower(): continue
+            applies.append({"id": r["id"], "name": r["name"], "enabled": r["enabled"], "trigger": r["trigger"]})
+        out.append({"code": s["code"], "name": s["name"], "dept": s.get("dept", ""), "next": s.get("next", []), "branch": s.get("branch"),
+                    "owners": s.get("owners", []), "validator": s.get("validator", ""), "sla_hours": s.get("sla_hours"),
+                    "counts": {"open": sum(t["status"] in ("assigned", "in_progress") for t in mine),
+                               "overdue": sum(t["status"] in ("assigned", "in_progress") and t["due_at"] < cur for t in mine),
+                               "waiting_check": sum(t["status"] == "submitted" for t in mine)},
+                    "rules": applies})
+    return {"start_stage": FLOW.get("start_stage"), "final_stages": FLOW.get("final_stages", []), "stages": out,
+            "bill_rules": [{"id": r["id"], "name": r["name"], "enabled": r["enabled"], "trigger": r["trigger"]} for r in rules if TRIGGERS.get(r["trigger"], ("", ""))[1] != "task"]}
+def rules_meta():
+    return {"rules": [rule_row(r) for r in q("SELECT * FROM rules ORDER BY id")],
+            "triggers": [{"id": k, "label": v[0], "scope": v[1], "value": v[2]} for k, v in TRIGGERS.items()],
+            "actions": [{"id": k, "label": v[0], "params": v[1], "needs_task": v[2]} for k, v in ACTIONS.items()],
+            "conditions": [{"id": k, "label": v[0], "type": v[1], "scopes": list(v[2])} for k, v in CONDITIONS.items()],
+            "placeholders": list(PLACEHOLDERS), "alert_targets": ["assignee", "approver", "admins", "department:<name>", "person:<name>"],
+            "people": [{"name": u["name"], "dept": u.get("dept", ""), "admin": bool(u.get("admin"))} for u in USERS],
+            "departments": depts(), "stages": [{"code": s["code"], "name": s["name"], "dept": s.get("dept", "")} for s in FLOW["stages"]],
+            "templates": [t["name"] for t in templates()]}
 
 # ------------------------------------------------------------------ views
 def task_folder(t):
@@ -983,6 +1380,7 @@ def wipe_all():
     with LOCK:
         DB.executescript("DROP TABLE IF EXISTS bills; DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS events; DROP TABLE IF EXISTS alerts; DROP TABLE IF EXISTS adhoc; DROP TABLE IF EXISTS work_log;")
         DB.executescript(SCHEMA); migrate(DB)
+        DB.execute("DELETE FROM rule_runs"); DB.commit()   # task ids start again from 1; the rules themselves stay
     ADHOC.clear()
     if storage_on(): shutil.rmtree(os.path.join(storage_root(), DEMO_DIR), ignore_errors=True)
 
@@ -1396,6 +1794,16 @@ class H(BaseHTTPRequestHandler):
             self.need_admin(qs)
             rows = [task_view(t) for t in q("SELECT * FROM tasks WHERE stage LIKE 'TASK-%' ORDER BY id DESC LIMIT 200")]
             return self.send_json({"tasks": rows, "bills": q("SELECT id, client FROM bills WHERE status='open' ORDER BY id")})
+        # ---- automation rules (admins)
+        if u.path == "/api/rules":
+            self.need_admin(qs); return self.send_json(rules_meta())
+        if u.path == "/api/rules/log":
+            self.need_admin(qs)
+            try: limit = min(500, max(1, int((qs.get("limit") or ["50"])[0])))
+            except ValueError: raise FlowError("limit must be a number")
+            return self.send_json({"runs": q("SELECT rr.*, r.name AS rule FROM rule_runs rr LEFT JOIN rules r ON r.id=rr.rule_id ORDER BY rr.id DESC LIMIT ?", (limit,))})
+        if u.path == "/api/workflow-model":
+            self.need_admin(qs); return self.send_json(workflow_model((qs.get("demo") or ["0"])[0] == "1"))
         self.send_json({"error": "Not found"}, 404)
 
     def do_POST(self):
@@ -1493,6 +1901,25 @@ class H(BaseHTTPRequestHandler):
                 broadcast({"type": "refresh"}); return self.send_json({"ok": True, "lunch": c})
             if u.path == "/api/automation/open-now":
                 return self.send_json({"ok": True, "bills": open_bills_for_contracts(actor)})
+            if u.path == "/api/rules":
+                return self.send_json({"ok": True, "rule": save_rule(b.get("rule") or b, actor)})
+            if len(parts) == 4 and parts[:2] == ["api", "rules"]:
+                try: rid = int(parts[2])
+                except ValueError: raise FlowError("Unknown rule")
+                r = q("SELECT * FROM rules WHERE id=?", (rid,))
+                if not r: raise FlowError("That rule no longer exists")
+                if parts[3] == "toggle":
+                    on = 0 if r[0]["enabled"] else 1
+                    if "enabled" in b: on = 1 if b.get("enabled") else 0
+                    x("UPDATE rules SET enabled=? WHERE id=?", (on, rid))
+                    log(None, None, "rule", actor, f"{actor} turned rule '{r[0]['name']}' {'on' if on else 'off'}")
+                    return self.send_json({"ok": True, "rule": rule_row(q("SELECT * FROM rules WHERE id=?", (rid,))[0])})
+                if parts[3] == "delete":
+                    x("DELETE FROM rules WHERE id=?", (rid,)); x("DELETE FROM rule_runs WHERE rule_id=?", (rid,))
+                    log(None, None, "rule", actor, f"{actor} deleted rule '{r[0]['name']}'"); return self.send_json({"ok": True})
+                if parts[3] == "test":
+                    return self.send_json(dict(rule_test(rid), ok=True))
+                raise FlowError("Unknown rule action")
             if u.path in ("/api/workflow/upload", "/api/workflow/load"):
                 if u.path == "/api/workflow/upload":
                     try: data = base64.b64decode(b.get("file") or "")
