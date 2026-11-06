@@ -93,3 +93,5 @@ Admins make rules: **When** something happens (a trigger), **If** the conditions
 | `sessions` | sign-in tokens |
 
 Statuses are `assigned` → `in_progress` → `submitted` → `approved`; a sent-back task goes back to `in_progress`. For tasks an admin gave, `approved` + `ended_at` means the task is finished.
+
+Rule execution is serialized across scheduler and request threads. `rule_runs.trigger` records the trigger at firing time; deduplication uses rule, task and trigger. Malformed rules are isolated and logged as errors. API dry runs use current task details for historical events (they do not reconstruct past ownership or rework counts).
