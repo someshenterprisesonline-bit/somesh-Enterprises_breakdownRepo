@@ -63,12 +63,12 @@ rem ---------- 2. Required packages
 if not exist "backend\requirements.txt" goto nofiles
 if not exist "backend\app.py" goto nofiles
 if not exist "frontend\index.html" goto nofiles
-%PY% -c "import openpyxl" >nul 2>nul
+%PY% -c "import openpyxl, reportlab" >nul 2>nul
 if not errorlevel 1 goto haveparts
 echo  Installing required packages - one time only...
 %PY% -m ensurepip --upgrade >nul 2>nul
 %PY% -m pip install --user --disable-pip-version-check -r backend\requirements.txt
-%PY% -c "import openpyxl" >nul 2>nul
+%PY% -c "import openpyxl, reportlab" >nul 2>nul
 if not errorlevel 1 goto haveparts
 echo.
 echo  [!] Could not install the required packages.

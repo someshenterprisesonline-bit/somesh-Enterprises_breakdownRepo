@@ -19,3 +19,14 @@ venv/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local credentials and exported test artifacts
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+*service-account*.json
+playwright-report/
+test-results/

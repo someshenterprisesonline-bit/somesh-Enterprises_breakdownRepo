@@ -3,10 +3,10 @@
 
 Each stage is a task. When a stage is approved, the next team's task is created and its
 members get an alert (popup + sound in the browser, and optionally email / ntfy / webhook).
-Runs on Python 3.9+ with the standard library only.
+Runs on Python 3.9+ with openpyxl and ReportLab (see requirements.txt).
 
     python app.py              start the server (http://localhost:8080)
-    python app.py --demo       wipe the database and load dummy bills, then start
+    python app.py --demo       reload dummy bills (keep real bills), then start
     python app.py --template   write samples/Workflow_Input_Template.xlsx from the current definitions
 
 The stages, people and settings can be replaced from an Excel workbook (Google Sheet link, file path,
@@ -39,6 +39,7 @@ STAGES = {s["code"]: s for s in FLOW["stages"]}
 ORDER = [s["code"] for s in FLOW["stages"]]
 USER_NAMES = {u["name"] for u in USERS}
 APP_NAME = "SOMESH ENTERPRISES"
+APP_VERSION = "2.0"
 def speed():
     return max(1, int(FLOW.get("settings", {}).get("demo_speed", CONFIG.get("demo_speed", 1)) or 1))
 DEMO_SPEED = 60          # demo bills run 60x faster (1 hour of time limit = 1 minute); real work uses Time speed
@@ -71,7 +72,7 @@ CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT
 CREATE TABLE IF NOT EXISTS work_log (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER, user TEXT, start TEXT, end TEXT);
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS adhoc (code TEXT PRIMARY KEY, def TEXT, created_by TEXT, created_at TEXT);
-CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, user TEXT, kind TEXT, title TEXT, body TEXT, task_id INTEGER, bill_id TEXT, read INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, user TEXT, kind TEXT, title TEXT, body TEXT, task_id INTEGER, bill_id TEXT, read INTEGER DEFAULT 0, snoozed_until TEXT);
 CREATE TABLE IF NOT EXISTS rules (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, enabled INTEGER DEFAULT 0, trigger TEXT,
   conditions TEXT, actions TEXT, created_by TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS rule_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER, ts TEXT, task_id INTEGER, bill_id TEXT, result TEXT, detail TEXT, trigger TEXT);
@@ -106,6 +107,8 @@ def migrate(c):
     tcols = {r[1] for r in c.execute("PRAGMA table_info(tasks)")}
     for col in ("last_reminded", "ended_at"):
         if col not in tcols: c.execute(f"ALTER TABLE tasks ADD COLUMN {col} TEXT")
+    acols = {r[1] for r in c.execute("PRAGMA table_info(alerts)")}
+    if "snoozed_until" not in acols: c.execute("ALTER TABLE alerts ADD COLUMN snoozed_until TEXT")
     rcols = {r[1] for r in c.execute("PRAGMA table_info(rule_runs)")}
     if "trigger" not in rcols: c.execute("ALTER TABLE rule_runs ADD COLUMN trigger TEXT")
     c.commit()
@@ -418,7 +421,7 @@ def end_task(tid, actor):
 def tracker(day, demo=False):
     """Every task with time on 'day' (or running now), with the worked time inside that day and in total. Demo tasks only with demo=True."""
     lo = datetime.combine(day, datetime.min.time()); hi = lo + timedelta(days=1); d0 = day.strftime("%Y-%m-%d")
-    ids = {r["task_id"] for r in q("SELECT task_id FROM work_log WHERE start < ? AND (end IS NULL OR end >= ?)", (ts(hi), ts(lo)))}
+    ids = {r["task_id"] for r in q("SELECT w.task_id FROM work_log w JOIN tasks t ON t.id=w.task_id WHERE w.start < ? AND (w.end IS NULL OR w.end >= ?)", (ts(hi), ts(lo)))}
     ids |= {r["id"] for r in q("SELECT id FROM tasks WHERE substr(submitted_at,1,10)=? OR substr(decided_at,1,10)=? OR substr(ended_at,1,10)=?", (d0, d0, d0))}
     rows, nowdt = [], now()
     for tid in sorted(ids):
@@ -643,7 +646,7 @@ def tracker_xlsx(day):
         ws2.append([tr["date"], p_["person"], p_["dept"], p_["tasks"], p_["finished"], hm(p_["seconds"]), round(p_["seconds"] / 60), p_["running"] or ""])
     ws3 = wb.create_sheet("Time log"); ws3.append(["Task code", "Task", "Person", "Timer started", "Timer stopped", "Minutes (lunch excluded)"])
     lo = datetime.combine(day, datetime.min.time()); hi = lo + timedelta(days=1)
-    for w in q("SELECT * FROM work_log WHERE start < ? AND (end IS NULL OR end >= ?) ORDER BY start", (ts(hi), ts(lo))):
+    for w in q("SELECT w.* FROM work_log w JOIN tasks t ON t.id=w.task_id WHERE w.start < ? AND (w.end IS NULL OR w.end >= ?) ORDER BY w.start", (ts(hi), ts(lo))):
         t = get_task(w["task_id"])
         ws3.append([t["stage"], sdef(t["stage"])["name"], w["user"], w["start"], w["end"] or "running", round(net_seconds(w["start"], w["end"] or now(), lo, hi) / 60)])
     lw = lunch_window(day)
@@ -1333,6 +1336,98 @@ def task_view(t):
     d["worked_seconds"], d["timer_from"] = worked(t["id"])
     return d
 
+# Alert Center: recipient-scoped history, current workflow facts and non-destructive preferences.
+def alert_center(user):
+    rows = q("SELECT * FROM alerts WHERE user=? AND (bill_id IS NULL OR bill_id NOT LIKE 'DEMO-%') ORDER BY id DESC", (user,))
+    tasks = {t["id"]: t for t in q("SELECT * FROM tasks WHERE id IN (SELECT task_id FROM alerts WHERE user=?)", (user,))}
+    bills = {b["id"]: b for b in q("SELECT id,client,contract_no,contract_status FROM bills WHERE demo=0 OR demo IS NULL")}
+    groups = {}; stamp = ts(); urgent_keys = set(); approval_keys = set()
+    counts = {"unread": 0, "total_unread": 0, "urgent": 0, "approvals": 0, "updates": 0, "snoozed": 0, "total": 0}
+    for a in rows:
+        t = tasks.get(a["task_id"])
+        if t and str(t["bill_id"] or "").startswith("DEMO-"): continue
+        counts["total"] += 1
+        definition = sdef(t["stage"]) if t else {}
+        bid = a["bill_id"] or (t["bill_id"] if t else None)
+        if not bid and (a["title"] or "").startswith("Contract check:"):
+            match = re.search(r"\bBILL-\d{4}-\d+\b", a["body"] or "")
+            if match and match[0] in bills: bid = match[0]
+        bill = bills.get(bid, {})
+        overdue = bool(t and t["status"] in ("assigned", "in_progress") and t["due_at"] and t["due_at"] < stamp)
+        workflow_error = bool(a["title"] == "Workflow file has problems" and globals().get("INPUT", {}).get("error"))
+        pending = bool(t and t["status"] == "submitted" and t["validator"] == user)
+        contract_issue = bool(bill.get("contract_status") and bill["contract_status"] != "Active")
+        contract_alert = (a["title"] or "").startswith("Contract check:") and bool(bill)
+        compliance = bool(t and "compliance" in definition.get("dept", "").lower() and t["status"] == "in_progress" and t["rework_count"] and t["decision_note"])
+        if overdue or workflow_error:
+            priority, category, reason = 0, "urgent", ("Past the current task deadline" if overdue else "Workflow input currently has an error")
+        elif pending:
+            priority, category, reason = 1, "approvals", "Submitted work awaiting your approval"
+        elif (contract_alert and contract_issue) or compliance:
+            priority, category, reason = 2, "updates", ("Contract status: " + bill["contract_status"] if contract_alert else "Compliance correction requested")
+        elif t and a["kind"] == "new_task" and t["status"] in ("assigned", "in_progress"):
+            priority, category, reason = 3, "updates", "Task assignment"
+        else:
+            priority, category, reason = 4, "updates", "Activity update"
+        urgent = priority == 0
+        snoozed = bool(not urgent and a.get("snoozed_until") and a["snoozed_until"] > stamp)
+        key = f"task:{t['id']}:{a['kind']}" if t else f"alert:{a['id']}"
+        record = {k: a[k] for k in ("id", "ts", "kind", "title", "body", "read", "snoozed_until")}
+        record["snoozed"] = snoozed
+        g = groups.setdefault(key, {"key": key, "records": [], "priority": priority, "category": category, "reason": reason,
+            "urgent": urgent, "can_review": pending, "is_contract": contract_alert, "bill_id": bid,
+            "client": bill.get("client", ""), "contract_no": bill.get("contract_no", ""), "contract_status": bill.get("contract_status", ""),
+            "task": {"id": t["id"], "stage": t["stage"], "name": definition.get("name", t["stage"]), "dept": definition.get("dept", ""),
+                     "person": t["assignee"] or ", ".join(json.loads(t["owners"])), "validator": t["validator"], "status": t["status"], "due_at": t["due_at"]} if t else None})
+        g["records"].append(record)
+        if not a["read"]: counts["total_unread"] += 1
+        if snoozed: counts["snoozed"] += 1
+        else:
+            if not a["read"]:
+                counts["unread"] += 1
+                if category == "updates": counts["updates"] += 1
+            if urgent: urgent_keys.add(f"task:{t['id']}" if t else key)
+            if pending: approval_keys.add(t["id"])
+    result = []
+    for g in groups.values():
+        g["unread"] = sum(not a["read"] and not a["snoozed"] for a in g["records"])
+        g["snoozed"] = all(a["snoozed"] for a in g["records"])
+        g["latest"] = next((a for a in g["records"] if not a["snoozed"]), g["records"][0])
+        result.append(g)
+    result.sort(key=lambda g: (g["priority"], not bool(g["unread"]), -g["latest"]["id"]))
+    counts["urgent"], counts["approvals"] = len(urgent_keys), len(approval_keys)
+    return {"groups": result, "counts": counts, "server_now": stamp}
+
+def owned_alert_ids(user, body):
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not ids or len(ids) > 500 or any(type(i) is not int or not 0 < i <= 9223372036854775807 for i in ids):
+        raise FlowError("Choose between 1 and 500 alert IDs")
+    ids = list(dict.fromkeys(ids)); marks = ",".join("?" for _ in ids)
+    if len(q(f"SELECT id FROM alerts WHERE user=? AND id IN ({marks})", (user, *ids))) != len(ids):
+        raise Denied("These alerts are not available to your account")
+    return ids
+
+def read_alerts(user, body):
+    if "ids" not in body:
+        x("UPDATE alerts SET read=1 WHERE user=?", (user,))
+    else:
+        ids = owned_alert_ids(user, body)
+        x(f"UPDATE alerts SET read=1 WHERE user=? AND id IN ({','.join('?' for _ in ids)})", (user, *ids))
+    push(user, {"type": "alerts_changed"})
+
+def snooze_alerts(user, body):
+    if not is_admin(user): raise Denied("Only admins can snooze alerts")
+    ids = owned_alert_ids(user, body); minutes = body.get("minutes", 60)
+    if type(minutes) is not int or minutes not in (0, 15, 60, 240): raise FlowError("Snooze for 15, 60 or 240 minutes, or use 0 to undo")
+    with LOCK:
+        center = alert_center(user)
+        if minutes and any(g["urgent"] and any(a["id"] in ids for a in g["records"]) for g in center["groups"]):
+            raise FlowError("Urgent alerts cannot be snoozed")
+        until = ts(now() + timedelta(minutes=minutes)) if minutes else None
+        x(f"UPDATE alerts SET snoozed_until=? WHERE user=? AND id IN ({','.join('?' for _ in ids)})", (until, user, *ids))
+    push(user, {"type": "alerts_changed"})
+
+
 def state(user):
     mine = [task_view(t) for t in q("SELECT * FROM tasks WHERE bill_id NOT LIKE 'DEMO-%' AND (status IN ('assigned','in_progress','submitted') OR "
                                     "(status='approved' AND stage LIKE 'TASK-%' AND ended_at IS NULL)) ORDER BY id")
@@ -1569,9 +1664,14 @@ def apply_definitions(parsed, actor, source, open_bills=True):
         try:
             with open(os.path.join(BASE, name), "rb") as a, open(os.path.join(bdir, f"{stamp}-{name}"), "wb") as b: b.write(a.read())
         except OSError: pass
-    save("workflow.json", {"_about": f"Loaded from {source} on {ts()} by {actor}. Change it with the Workflow input page.", **flow})
-    save("users.json", {"_about": f"Loaded from {source} on {ts()}.", "users": users})
     with LOCK:
+        if not any(u.get("admin") for u in users): raise FlowError("Keep at least one active Admin")
+        previous_roles = {u["name"]: bool(u.get("admin")) for u in USERS}
+        changed_roles = {u["name"] for u in users if bool(u.get("admin")) != previous_roles.get(u["name"], False)}
+        changed_roles.update(set(previous_roles) - {u["name"] for u in users})
+        save("workflow.json", {"_about": f"Loaded from {source} on {ts()} by {actor}. Change it with the Workflow input page.", **flow})
+        save("users.json", {"_about": f"Loaded from {source} on {ts()}.", "users": users})
+        for name in changed_roles: DB.execute("DELETE FROM sessions WHERE user=?", (name,))
         FLOW.clear(); FLOW.update(flow)
         STAGES.clear(); STAGES.update({st["code"]: st for st in flow["stages"]})
         ORDER[:] = [st["code"] for st in flow["stages"]]
@@ -1649,10 +1749,63 @@ def is_admin(name):
 # ------------------------------------------------------------------ sign-in
 # Admins sign in with a PIN (config.json -> security). Everyone gets a session token; the server takes the person from the
 # token, never from the request, and admin-only data (pipeline, bills, workflow, automation) needs an admin session.
+PIN_ATTEMPTS = {}
+
 def admin_pin_ok(user, pin):
     sec = CONFIG.get("security", {})
     want = str(sec.get("pins", {}).get(user) or sec.get("admin_pin") or "")
-    return bool(want) and hmac.compare_digest(str(pin or ""), want)
+    return bool(want) and hmac.compare_digest(str(pin or "").encode("utf-8"), want.encode("utf-8"))
+
+def verify_admin_pin(user, pin):
+    """Rate-limit PIN checks without changing existing credentials or session formats."""
+    with LOCK:
+        cut = time.monotonic() - 300
+        attempts = [t for t in PIN_ATTEMPTS.get(user, []) if t > cut]
+        PIN_ATTEMPTS[user] = attempts
+        if len(attempts) >= 5: raise FlowError("Too many PIN attempts. Try again in 5 minutes.")
+        if not admin_pin_ok(user, pin):
+            attempts.append(time.monotonic())
+            raise FlowError("Wrong PIN")
+        PIN_ATTEMPTS.pop(user, None)
+
+def admin_management():
+    return {"users": [{k: v for k, v in u.items() if k in ("name", "dept", "role", "admin")} for u in USERS],
+            "admin_count": len(admins()),
+            "audit": q("SELECT ts,actor,text FROM events WHERE kind='admin_access' ORDER BY id DESC LIMIT 20")}
+
+def change_admin_role(actor, body):
+    if not isinstance(body, dict): raise FlowError("Role change must be an object")
+    target, enabled = body.get("user"), body.get("admin")
+    if not isinstance(target, str) or target not in USER_NAMES: raise FlowError("Choose an existing employee")
+    if not isinstance(enabled, bool): raise FlowError("Admin permission must be true or false")
+    with LOCK:
+        if not is_admin(actor): raise Denied("Only admins can manage admin permissions")
+        if target not in USER_NAMES: raise FlowError("Choose an existing employee")
+        if target == actor and enabled: raise FlowError("You cannot promote yourself")
+        current = is_admin(target)
+        if current == enabled: raise FlowError("This employee already has that role. Refresh the list.")
+        if current and not enabled and len(admins()) <= 1: raise FlowError("The last active Admin cannot be removed")
+        verify_admin_pin(actor, body.get("confirmation_pin"))
+        original = load("users.json")
+        updated = {**original, "users": [{**u, "admin": enabled} if u["name"] == target else dict(u) for u in USERS]}
+        action = "granted Admin access to" if enabled else "revoked Admin access from"
+        event = f"{actor} {action} {target}"
+        saved = False
+        try:
+            DB.execute("BEGIN IMMEDIATE")
+            DB.execute("DELETE FROM sessions WHERE user=?", (target,))
+            DB.execute("INSERT INTO events (ts,bill_id,task_id,kind,actor,text) VALUES (?,NULL,NULL,?,?,?)",
+                       (ts(), "admin_access", actor, event))
+            save("users.json", updated); saved = True
+            DB.commit()
+        except Exception:
+            DB.rollback()
+            if saved: save("users.json", original)
+            raise
+        USERS[:] = updated["users"]
+    broadcast({"type": "reload"}); STORAGE_DIRTY.set(); GATHER_DIRTY.set()
+    return admin_management()
+
 def is_dc(name):
     return any(u["name"] == name and "data center" in u.get("dept", "").lower() for u in USERS)
 def new_session(user):
@@ -1666,8 +1819,12 @@ class NeedLogin(Exception): pass
 class Denied(Exception): pass
 
 class H(BaseHTTPRequestHandler):
-    server_version = "SomeshEnterprises/3.0"
+    server_version = f"SomeshEnterprises/{APP_VERSION}"
     def log_message(self, *a): pass
+
+    def handle(self):
+        try: super().handle()
+        except ConnectionError: pass  # Closing a tab can abort an idle keep-alive socket on Windows.
     def send_json(self, obj, code=200):
         b = json.dumps(obj, default=str).encode()
         self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b)))
@@ -1708,6 +1865,7 @@ class H(BaseHTTPRequestHandler):
             print("error:", repr(e)); self.send_json({"error": "Server error: " + str(e)}, 500)
 
     def get(self, u, qs):
+        parts = u.path.strip("/").split("/")
         if u.path in ("/", "/index.html"):
             with open(os.path.join(FRONTEND, "index.html"), "rb") as f: b = f.read()
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(b)))
@@ -1724,6 +1882,20 @@ class H(BaseHTTPRequestHandler):
                                    "demo_speed": speed(), "app_name": APP_NAME, "server_now": ts(), "start_stage": FLOW.get("start_stage"),
                                    "handoff_base": os.path.join(storage_root(), ST.HANDOFF) if storage_on() else "", "sep": os.sep,
                                    "storage": storage_on(), "email": bool(CONFIG.get("email", {}).get("enabled")), "lunch": lunch_cfg(), "has_demo": bool(demo_ids())})
+        if u.path == "/api/alerts":
+            user = self.need_admin(qs); return self.send_json(alert_center(user))
+        if len(parts) == 4 and parts[:2] == ["api", "alerts"] and parts[3] == "task":
+            user = self.need_admin(qs)
+            try:
+                aid = int(parts[2])
+                if not 0 < aid <= 9223372036854775807: raise ValueError()
+            except ValueError: raise FlowError("Choose an existing alert")
+            alerts_ = q("SELECT task_id FROM alerts WHERE id=? AND user=?", (aid, user))
+            if not alerts_: raise Denied("This alert is not available to your account")
+            if not alerts_[0]["task_id"]: raise FlowError("This notification has no linked task")
+            return self.send_json({"task": task_view(get_task(alerts_[0]["task_id"]))})
+        if u.path == "/api/admins":
+            self.need_admin(qs); return self.send_json(admin_management())
         if u.path == "/api/me":
             user = self.who(qs); return self.send_json({"user": user, "admin": is_admin(user)})
         if u.path == "/api/state":
@@ -1785,10 +1957,13 @@ class H(BaseHTTPRequestHandler):
             self.need_admin(qs); a = auto_cfg()
             active = [c for c in (ST.load_register(storage_root()) if storage_on() else []) if ST.contract_for(storage_root(), str(c.get("Client") or ""))[1] == "Active"]
             return self.send_json({"settings": a, "active_contracts": len(active)})
-        if u.path in ("/api/tracker", "/api/tracker/export"):
+        if u.path in ("/api/tracker", "/api/tracker/export", "/api/tracker/export.pdf"):
             self.need_admin(qs)
             try: day = datetime.strptime((qs.get("date") or [""])[0] or now().strftime("%Y-%m-%d"), "%Y-%m-%d").date()
             except ValueError: raise FlowError("Date must look like 2026-11-03")
+            if u.path.endswith("export.pdf"):
+                from tracker_export import tracker_pdf
+                return self.send_bytes(tracker_pdf(tracker(day)), "application/pdf", f"Tracker_{day:%Y-%m-%d}.pdf")
             if u.path.endswith("export"):
                 data = tracker_xlsx(day)
                 if storage_on():   # a copy goes into the local storage too
@@ -1796,7 +1971,7 @@ class H(BaseHTTPRequestHandler):
                     try:
                         with open(os.path.join(daily, f"Time_Tracker_{day:%Y-%m-%d}.xlsx"), "wb") as f: f.write(data)
                     except PermissionError: pass
-                return self.send_bytes(data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"Time_Tracker_{day:%Y-%m-%d}.xlsx")
+                return self.send_bytes(data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"Tracker_{day:%Y-%m-%d}.xlsx")
             return self.send_json(tracker(day, (qs.get("demo") or ["0"])[0] == "1"))
         if u.path == "/api/templates":
             self.need_admin(qs); return self.send_json({"templates": templates()})
@@ -1834,16 +2009,20 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); parts = u.path.strip("/").split("/"); qs = parse_qs(u.query)
         try:
             b = self.body()
+            if not isinstance(b, dict): raise FlowError("Request body must be an object")
             if u.path == "/api/login":
                 name = b.get("user", "")
-                if name not in USER_NAMES: raise FlowError("Pick your name")
-                if is_admin(name) and not admin_pin_ok(name, b.get("pin")): raise FlowError("Wrong PIN")
-                return self.send_json({"ok": True, "token": new_session(name), "user": name, "admin": is_admin(name)})
+                with LOCK:  # Role changes and session issuance must not race.
+                    if not isinstance(name, str) or name not in USER_NAMES: raise FlowError("Pick your name")
+                    if is_admin(name): verify_admin_pin(name, b.get("pin"))
+                    return self.send_json({"ok": True, "token": new_session(name), "user": name, "admin": is_admin(name)})
             actor = self.who(qs)
             if u.path == "/api/logout":
                 x("DELETE FROM sessions WHERE token=?", (self.headers.get("X-Session") or "",)); return self.send_json({"ok": True})
             if u.path == "/api/alerts/read":
-                x("UPDATE alerts SET read=1 WHERE user=?", (actor,)); return self.send_json({"ok": True})
+                read_alerts(actor, b); return self.send_json({"ok": True})
+            if u.path == "/api/alerts/snooze":
+                snooze_alerts(actor, b); return self.send_json({"ok": True})
             if len(parts) == 4 and parts[:2] == ["api", "tasks"]:
                 tid = int(parts[2]); act = parts[3]
                 if is_lunch() and not is_admin(actor):
@@ -1876,6 +2055,8 @@ class H(BaseHTTPRequestHandler):
                 storage_sync(); return self.send_json({"ok": True, "status": STORAGE_STATUS})
             # ---- admin only from here
             if not is_admin(actor): raise Denied("Only admins can do this")
+            if u.path == "/api/admins/role":
+                return self.send_json({"ok": True, **change_admin_role(actor, b)})
             if u.path == "/api/bills":
                 clients = [c.strip() for c in re.split(r"[\n,]+", b.get("client") or "") if c.strip()]
                 if not clients: raise FlowError("Type the client name")

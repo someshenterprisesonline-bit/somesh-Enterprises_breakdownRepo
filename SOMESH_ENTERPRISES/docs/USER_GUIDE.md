@@ -48,7 +48,7 @@ A Tracker export is also saved to `storage/01 Master Tracker/<Year>/Daily Time T
 1. **Extract** the zip first (right-click → Extract All), for example to `C:\SomeshEnterprises`. Double-clicking the .bat while it is still inside the zip will not work.
 2. Double-click **`START SOMESH ENTERPRISES.bat`**. It:
    - checks for Python 3.9+, and if it's missing installs Python 3.12 (with `winget`, or straight from python.org),
-   - checks for the one package the app needs (`openpyxl`, the Excel reader) and installs it if missing,
+   - checks for the Excel/PDF packages (`openpyxl` and ReportLab) and installs them if missing,
    - starts the app and opens **http://localhost:8080** in your browser.
 
    The first run needs internet and takes 1–3 minutes. After that it starts in a few seconds.
@@ -124,7 +124,7 @@ Admins see **My tasks, To check, Tracker, Overview, Pipeline, Activity, Alerts, 
 
 ## Admin control and automation
 
-**Sign-in:** team members pick their name. **Admins** (People sheet: Admin = Yes) also type a **PIN**. The default is `1234`: change it in `config.json → security.admin_pin`, or give each admin their own PIN under `security.pins` (for example `{"Somesh": "4821"}`), then restart. The server reads who someone is from their sign-in, never from the page. Without an admin sign-in, the pipeline, Overview, Activity, bill details, workflow, automation and demo controls are refused.
+**Sign-in:** team members pick their name. **Admins** (People sheet: Admin = Yes) also type their configured **PIN**. Credentials are under `config.json → security.admin_pin`, with optional per-person overrides in `security.pins`; keep them private. Enter and Sign in use the same authentication flow. Manage Admins in the authenticated header can grant/revoke access after PIN confirmation, preserves profiles/tasks and protects the last Admin. The server reads identity from the session, never a frontend role flag. Without an Admin sign-in, the pipeline, Overview, Activity, bill details, workflow, automation and demo controls are refused.
 
 | Who | Sees |
 |---|---|

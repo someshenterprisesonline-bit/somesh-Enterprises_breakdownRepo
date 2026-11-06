@@ -9,11 +9,11 @@ Frontend paths are under `frontend/`. Backend functions are in `backend/app.py` 
 
 | Page (tab) | Who sees it | Frontend file | Frontend functions | Backend routes | Backend functions |
 |---|---|---|---|---|---|
-| **Sign-in screen** | everyone | `js/core/shell.js` | `render()` (top part), `signIn`, `finishSignIn`, `logout` | `POST /api/login`, `/api/logout`, `GET /api/me`, `/api/meta` | `admin_pin_ok`, `new_session`, `session_user` |
+| **Sign-in screen** | everyone | `js/core/shell.js`, `js/core/login-and-admins.js` | `loginMarkup`, `wireLogin`, `startBrandIntro`, `signIn`, `finishSignIn`, `logout` | `POST /api/login`, `/api/logout`, `GET /api/me`, `/api/meta` | `verify_admin_pin`, `new_session`, `session_user` |
 | **My tasks** | everyone | `js/pages/my-tasks.js` | `viewMine` | `GET /api/state` | `state`, `task_view` |
 | **To check** | approvers, admins | `js/pages/my-tasks.js` | `viewCheck` | `GET /api/state` | `state` |
 | Task buttons on the cards (Start, Done, Approve, Send back, End, attach files) | everyone | `js/core/actions.js`, `js/core/components.js` | `act`, `dialog`, `taskCard`, `attachFiles` | `POST /api/tasks/<id>/claim, submit, approve, reject, end, upload, unupload` | `claim`, `submit`, `approve`, `reject`, `end_task`, `save_upload`, `timer_start`, `timer_stop` |
-| **Tracker** | admins | `js/pages/tracker.js` | `viewTracker`, `wireTracker` | `GET /api/tracker`, `/api/tracker/export`, `POST /api/lunch` | `tracker`, `tracker_xlsx`, `lunch_cfg` |
+| **Tracker** | admins | `js/pages/tracker.js` | `viewTracker`, `wireTracker`, `trShowPreview`, `trOpenEmployee`, `trWireTaskDisclosure`, `trDownload` | `GET /api/tracker`, `/api/tracker/export`, `/api/tracker/export.pdf`, `POST /api/lunch` | `tracker`, `tracker_xlsx`, `tracker_export.tracker_pdf`, `lunch_cfg` |
 | **Overview** | admins | `js/pages/overview.js` | `viewOverview` | `GET /api/pipeline` | `pipeline` |
 | **Dashboard** | admins | `js/pages/dashboard.js` | `viewDash`, `chartDaily`, `chartHeat`, `chartUtil`, `chartIdle`, `chartGap`, `gapTable`, `chartDept`, `chartTop`, `dashCsv`, `wireDash` | `GET /api/dashboard` | `dashboard`, `workday_cfg`, `available_seconds` |
 | **Pipeline → Timetable** | admins | `js/pages/pipeline.js` | `viewPipe`, `viewTimetable`, `showTip`, `lanesOf` | `GET /api/timetable` | `timetable` |
@@ -95,3 +95,30 @@ Admins make rules: **When** something happens (a trigger), **If** the conditions
 Statuses are `assigned` → `in_progress` → `submitted` → `approved`; a sent-back task goes back to `in_progress`. For tasks an admin gave, `approved` + `ended_at` means the task is finished.
 
 Rule execution is serialized across scheduler and request threads. `rule_runs.trigger` records the trigger at firing time; deduplication uses rule, task and trigger. Malformed rules are isolated and logged as errors. API dry runs use current task details for historical events (they do not reconstruct past ownership or rework counts).
+
+
+## Login and Admin access management
+
+`frontend/js/core/login-and-admins.js` supplies the Admin/Employees login accordion, cross-profile search, first-load CSS intro and `openAdminManagement` modal. `shell.js` keeps the existing PIN sign-in and adds Manage Admins beside the header controls. `main.js` starts the intro and refreshes public profile metadata while signed out.
+
+- `GET /api/admins` requires an authenticated Admin and returns existing users, Admin count and recent access audit entries.
+- `POST /api/admins/role` accepts `{user, admin: boolean, confirmation_pin}`. `change_admin_role` rechecks the acting Admin, validates the target and last-Admin guard under the shared lock, and checks the acting Admin's existing PIN with `verify_admin_pin` (five failed attempts per user in five minutes).
+- Roles remain in the existing `backend/users.json`, preserving all other profile fields and configured credentials. Changes invalidate the affected user's sessions and write `admin_access` Activity events with actor and timestamp. Login issuance and role updates share the lock; workflow imports also invalidate sessions when roles change and cannot remove the last Admin. No database migration is required.
+
+
+## Admin Alert Center and notification island
+
+`frontend/js/pages/alert-center.js` renders the recipient-scoped header island and Admin Alert Center (the employee Alerts sheet remains in `activity-alerts.js`). `shell.js` wires them on every Admin page. `live-and-load.js` reuses the existing SSE stream; refreshes are coalesced and a single 30-second check updates deadlines and expired snoozes. Opening Alerts never automatically marks Admin notifications read.
+
+- `GET /api/alerts`: Admin-only, all existing alerts addressed to that session user, grouped by task and event kind with every original message retained. `alert_center` derives priorities from live task deadlines/status, designated approver, current contract status and active workflow-input errors. Summary counts distinguish unread notifications from unresolved urgent issues and pending approval tasks.
+- `GET /api/alerts/<alert_id>/task`: Admin-only and recipient-checked; reuses `task_view` for workflow and admin-assigned tasks. Review actions call the existing task approve/reject routes, which still require the designated validator.
+- `POST /api/alerts/read`: existing route, now accepts optional `ids` for selected own alerts; omitting IDs preserves the existing mark-all behavior. It never changes tasks.
+- `POST /api/alerts/snooze`: Admin-only, own `ids` plus `minutes` (15, 60, 240 or 0 to undo). Urgent alerts cannot be snoozed; a task becoming overdue overrides an earlier snooze. The additive nullable `alerts.snoozed_until` migration preserves all existing alerts and read flags.
+- No alert history is deleted. Contract actions read existing authorized Storage data. UI refreshes abort on sign-out and stale task/contract responses cannot open another session's panel.
+
+
+### Island preview interaction
+
+The Admin header reserves a centered top dock for the fixed notification pill. Mouse hover opens its floating preview; leaving the pill and preview closes it after 300 ms, while touch/keyboard activation toggles it. The panel stays below header navigation, is at most 460 px wide and 65% of the visible viewport high, and scrolls internally.
+
+`acIslandCard` is the compact variant of `acCard`; the full Alerts page keeps its existing layout. Preview descriptions have separate `S.acIslandExpanded` state and only explicit Open task buttons invoke task navigation. `acWireIslandCards` handles captured pointer dragging and keyboard Up/Down reordering, suppresses release clicks, and defers live card repaint during a drag. Preferred display order is stored locally per Admin under `se_alert_island_order_<user>`. The preview still selects the backend's top five priority groups; neither priorities nor backend records are changed by ordering.
