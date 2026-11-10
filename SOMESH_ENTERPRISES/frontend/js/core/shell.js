@@ -71,6 +71,7 @@ async function signIn(name) {
   d.returnValue = ""; d.showModal(); setTimeout(() => { if (d.open) pin.focus(); }, 50);
 }
 function render() {
+  Theme.syncUser(S.user);
   const app = $("#app");
   xlPreserve();
   if (XL.user && XL.user !== S.user) xlResetSession();
@@ -94,6 +95,7 @@ function render() {
   const focus = null;
   app.innerHTML = `<header>${isAdmin() ? `<div class="ac-island-dock">${alertIslandHtml()}</div>` : ""}<div class="bar"><div class="brand"><div class="logo">S</div><div><b style="display:flex;align-items:center;gap:8px">${APP}<i id="dot" class="dot ${S.es && S.es.readyState === 1 ? "on" : ""}" title="Live connection"></i></b></div></div>
       ${isAdmin() ? `<button class="btn ghost" id="manageAdmins" type="button">Manage Admins</button>` : ""}
+      ${Theme.button()}
       <button class="btn" id="snd" type="button" aria-pressed="${S.sound}" title="Alert sound" aria-label="Alert sound">${S.sound ? "🔊" : "🔇"}</button>
       ${!isAdmin() ? `<button class="btn" id="help" type="button" title="How it works" aria-label="How it works">?</button>` : ""}${isAdmin() ? "" : `<button class="btn bell" id="bell" type="button" aria-label="Alerts${st.unread ? `, ${st.unread} unread` : ""}">🔔${st.unread ? `<b>${st.unread}</b>` : ""}</button>`}
       <div class="me">${avatar(S.user)}<b class="small">${esc(S.user)}</b><button class="btn ghost" id="logout" type="button">Switch</button></div></div>

@@ -7,7 +7,7 @@ const base=process.env.TEST_BASE_URL,info=JSON.parse(process.env.TEST_FIXTURE_IN
  const browser=await chromium.launch({headless:true,channel:process.env.BROWSER_CHANNEL||'chrome'}),errors=[];
  try{
   async function create(name,token,mobile=false){
-   const ctx=await browser.newContext({viewport:mobile?{width:390,height:844}:{width:1440,height:1000},reducedMotion:'reduce',isMobile:mobile,hasTouch:mobile});
+   const ctx=await browser.newContext({colorScheme:process.env.TEST_THEME || 'light',viewport:mobile?{width:390,height:844}:{width:1440,height:1000},reducedMotion:'reduce',isMobile:mobile,hasTouch:mobile});
    await ctx.route('https://fonts.googleapis.com/**',r=>r.fulfill({contentType:'text/css',body:''}));
    ctx.on('page',page=>page.on('pageerror',e=>errors.push(e.message)));const p=await ctx.newPage();p.on('response',r=>{if(r.url().includes('/api/excel')&&r.status()>=400)errors.push('API '+r.status()+' '+r.url());});
    await p.addInitScript(({name,token})=>{localStorage.setItem('se_token',token);localStorage.setItem('se_user',name);},{name,token});

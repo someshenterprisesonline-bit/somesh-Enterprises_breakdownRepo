@@ -1,0 +1,118 @@
+/* Central theme palette. Explicit pairs prevent light surfaces inheriting dark-mode ink. */
+:root, :root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff; --card: #ffffff; --card2: #f5f5f7; --fg: #1d1d1f;
+  --muted: #595962; --faint: #62626c; --line: #b6b6bf; --glass: rgba(255,255,255,.96);
+  --blue: #005cba; --blue-soft: #e8f1fd; --green: #176c2f; --green-soft: #e4f6e9;
+  --orange: #874000; --orange-soft: #fff1e0; --red: #b50013; --red-soft: #ffe9eb;
+  --purple: #71318e; --purple-soft: #f4eafa;
+  --danger-bg: #b50013; --primary-bg: #0062c7; --good-bg: #197235; --on-accent: #ffffff;
+  --hover: #e7e7ec; --selected-bg: #dceaff; --selected-ink: #003f85;
+  --disabled-bg: #e9e9ee; --disabled-ink: #62626c; --focus: #005cba;
+  --icon-bg: #e5e5eb; --alert-card: #ffffff; --alert-ink: #1d1d1f;
+  --alert-muted: #595962; --alert-button: #eeeeF2; --lunch-overlay: rgba(255,255,255,.96);
+  --shadow: 0 0 0 1px rgba(0,0,0,.05), 0 2px 4px rgba(0,0,0,.04), 0 10px 28px rgba(0,0,0,.09);
+  --shadow-hi: 0 2px 4px rgba(0,0,0,.05), 0 18px 40px rgba(0,0,0,.12);
+  --tshadow: 0 1px 1px rgba(0,0,0,.06);
+  --paper: #ffffff; --paper-ink: #171719; --paper-muted: #50505a;
+  --island-bg: #111114; --island-ink: #ffffff; --island-urgent: #ffb2b6;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #18181a; --card: #222225; --card2: #2b2b2f; --fg: #f5f5f7;
+  --muted: #c2c2cc; --faint: #b5b5c0; --line: #72727e; --glass: rgba(30,30,33,.97);
+  --blue: #8ec5ff; --blue-soft: #203249; --green: #8cdda2; --green-soft: #22382b;
+  --orange: #ffbd7d; --orange-soft: #453323; --red: #ff9aa4; --red-soft: #48282e;
+  --purple: #d7b2ef; --purple-soft: #392b43;
+  --primary-bg: #1459ac; --good-bg: #1c7038;
+  --hover: #3b3b43; --selected-bg: #25436a; --selected-ink: #e5efff;
+  --disabled-bg: #35353c; --disabled-ink: #b5b5c0; --focus: #a4d0ff;
+  --icon-bg: #393940; --alert-card: #222225; --alert-ink: #f5f5f7;
+  --alert-muted: #c2c2cc; --alert-button: #35353d; --lunch-overlay: rgba(24,24,26,.96);
+  --shadow: 0 1px 14px rgba(0,0,0,.22); --shadow-hi: 0 8px 30px rgba(0,0,0,.35); --tshadow: none;
+}
+
+/* Shared controls, menus, popups and surfaces. */
+button, input, textarea, select { color: var(--fg); }
+input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), textarea, select, option, optgroup {
+  background-color: var(--card2); color: var(--fg);
+}
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
+input[type=checkbox], input[type=radio] { accent-color: var(--primary-bg); }
+input::file-selector-button { background: var(--card2); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+a { color: var(--blue); }
+.btn { color: var(--fg); }
+.btn.primary, .btn.good { color: var(--on-accent); }
+.btn.primary { background: var(--primary-bg); }
+.btn.good { background: var(--good-bg); }
+.btn.ghost { color: var(--blue); }
+.btn.bad { color: var(--red); background: var(--red-soft); }
+.btn:hover { filter: none; box-shadow: inset 0 0 0 2px var(--line), var(--shadow); }
+.btn.primary:hover, .btn.good:hover { box-shadow: inset 0 0 0 2px var(--on-accent), var(--shadow-hi); }
+.btn:disabled { opacity: 1; background: var(--disabled-bg); color: var(--disabled-ink); box-shadow: none; cursor: not-allowed; }
+.btn[aria-pressed=true]:not(.theme-toggle), .seg button[aria-pressed=true], .ac-toolbar .seg button[aria-pressed=true] { background: var(--selected-bg); color: var(--selected-ink); }
+.seg button:not([aria-selected=true]):hover, .hb-row:hover, .login-group-toggle:hover { background: var(--hover); }
+.seg .n, .step::before, .asg-hint, .asg-tick { background: var(--primary-bg); color: var(--on-accent); }
+.asg-hint .btn.ghost { color: var(--on-accent); }
+.avatar { color: var(--avatar-ink, var(--on-accent)); }
+.wm-avt { fill: var(--avatar-ink, var(--on-accent)); }
+.theme-toggle { display: inline-flex; gap: 7px; align-items: center; min-height: 40px; flex: none; }
+.theme-icon { display: flex; }
+.login-theme-bar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.login-new h1, .intro-word { color: var(--fg); }
+.brand-intro { background: var(--bg); }
+#skipIntro { color: var(--muted); }
+.login-group { background: var(--card2); }
+.login-group-icon, .login-count { background: var(--icon-bg); color: var(--fg); }
+.run { background: linear-gradient(135deg, var(--blue-soft), var(--purple-soft)); color: var(--fg); }
+#lunch { background: var(--lunch-overlay); color: var(--fg); }
+#banner { background: var(--orange-soft); color: var(--orange); border-bottom: 1px solid var(--orange); }
+.b-run { background: var(--orange-soft); color: var(--orange); }
+.b-wait { background: var(--purple-soft); color: var(--purple); }
+.b-docs, .b-done, #ttPop .done { background: var(--green-soft); color: var(--green); }
+.b-back { background: var(--red-soft); color: var(--red); }
+.au-chip.bolt { background: var(--orange-soft); color: var(--orange); }
+.wm-bolt rect { fill: var(--orange-soft); stroke: var(--orange); }
+.wm-bolt text { fill: var(--orange); }
+.wm-st .wm-card { stroke: var(--line); }
+.wm-dept { fill: var(--fg); }
+.au-sh-head > div:last-child { color: var(--fg) !important; }
+.au-tpl { border-color: var(--line); }
+.tl .d { border-color: var(--card); }
+
+/* The island remains black; its expanded cards follow the selected theme. */
+.ac-island { background: var(--island-bg); color: var(--island-ink); }
+.ac-island-urgent { color: var(--island-urgent); }
+.ac-island-panel { color: var(--alert-ink); }
+.ac-island-panel .ac-card { background: var(--alert-card); color: var(--alert-ink); }
+.ac-island-panel .ac-time, .ac-island-panel .ac-absolute, .ac-island-description p, .ac-island-panel .muted { color: var(--alert-muted); }
+.ac-island-head .btn, .ac-actions .btn { background: var(--alert-button); color: var(--alert-ink); }
+.ac-actions .ac-review { background: var(--purple-soft); color: var(--purple); }
+.ac-actions .btn.primary { background: var(--primary-bg); color: var(--on-accent); }
+.ac-actions .btn:disabled, .ac-island-head .btn:disabled { background: var(--disabled-bg); color: var(--disabled-ink); }
+.ac-island-panel .ac-card:hover { border-color: var(--blue); }
+.ac-island-panel .ac-card:focus-within, .ac-is-dragging { outline: 2px solid var(--focus); outline-offset: 1px; }
+.ac-drag-handle, .ac-expand-alert { color: var(--fg); background: var(--card2); }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+  outline-color: var(--focus) !important; box-shadow: 0 0 0 2px var(--bg);
+}
+
+/* Paper previews and exports intentionally stay white with their own dark ink. */
+.xl-word-page { background: var(--paper); color: var(--paper-ink); --fg: var(--paper-ink); --muted: var(--paper-muted); }
+.xl-grid input { background: transparent !important; color: var(--fg); }
+.xl-grid .xl-calculated input { color: var(--fg); }
+.xl-word-paragraph[contenteditable=true]:focus { background: #e8f1fd; outline-color: #005cba; }
+@media print {
+  :root[data-theme] { color-scheme: light; --bg: var(--paper); --card: var(--paper); --card2: #f5f5f7; --fg: var(--paper-ink); --muted: var(--paper-muted); --faint: var(--paper-muted); --line: #aaa; --alert-card: var(--paper); --alert-ink: var(--paper-ink); --alert-muted: var(--paper-muted); --alert-button: #f5f5f7; --blue-soft: #e8f1fd; --green-soft: #e4f6e9; --orange-soft: #fff1e0; --red-soft: #ffe9eb; --purple-soft: #f4eafa; --icon-bg: #e5e5eb; --hover: #e7e7ec; --selected-bg: #dceaff; --selected-ink: #003f85; --disabled-bg: #e9e9ee; --disabled-ink: #62626c; --blue: #005cba; --green: #176c2f; --red: #b50013; --orange: #874000; --purple: #71318e; }
+  html, body { color: var(--paper-ink) !important; }
+  .theme-toggle { display: none !important; }
+}
+
+/* Solid fallback matches the fixed dark brand gradient. */
+.logo, .toast .ic { background-color: var(--island-bg); color: var(--island-ink); }
+
+/* Accent colors used as text are deliberately distinct from filled-badge colors. */
+.bell b { background: var(--danger-bg); color: var(--on-accent); }
+.au-badge.w { background: var(--blue-soft); color: var(--blue); }
+.au-badge.i { background: var(--orange-soft); color: var(--orange); }
+.au-badge.t { background: var(--green-soft); color: var(--green); }

@@ -1,11 +1,5 @@
 /* SOMESH ENTERPRISES - all styles. Sections: base & layout, components, timetable, sheet, v2 (buttons, palette, dashboard). */
 :root {
-  --bg: #ffffff; --card: #ffffff; --card2: #f5f5f7; --line: rgba(0,0,0,.08); color-scheme: light; --fg: #1d1d1f; --muted: #6e6e73; --faint: #86868b;
-  --blue: #0071e3; --blue-soft: #e8f1fd; --green: #248a3d; --green-soft: #e4f6e9; --orange: #c25e00; --orange-soft: #fff1e0;
-  --red: #d70015; --red-soft: #ffe9eb; --purple: #8944ab; --purple-soft: #f4eafa; --glass: rgba(255,255,255,.85);
-  --shadow: 0 0 0 1px rgba(0,0,0,.05), 0 2px 4px rgba(0,0,0,.04), 0 10px 28px rgba(0,0,0,.09);
-  --shadow-hi: 0 2px 4px rgba(0,0,0,.05), 0 18px 40px rgba(0,0,0,.12);
-  --tshadow: 0 1px 1px rgba(0,0,0,.06), 0 2px 10px rgba(0,0,0,.08);
   --f: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Inter", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 }
@@ -758,17 +752,3 @@ svg.wm { display: block; font-family: inherit; }
 .employee-section .actions { flex-wrap: wrap; }
 .employee-error { color: var(--red, #cf3b3b); }
 @media(max-width:600px) { .employee-section .admin-manager-head { align-items: flex-start; flex-direction: column; } }
-
-/* Follow the OS preference while keeping the existing neutral palette and layout. */
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --bg: #18181a; --card: #222225; --card2: #2b2b2f; --line: rgba(255,255,255,.14);
-    --fg: #f0f0f2; --muted: #b1b1b8; --faint: #9898a0; --glass: rgba(30,30,33,.9);
-    --blue: #61a9ff; --blue-soft: #203249; --green: #6bc783; --green-soft: #22382b;
-    --orange: #ffb466; --orange-soft: #453323; --red: #ff8793; --red-soft: #48282e;
-    --purple: #cc9be6; --purple-soft: #392b43;
-    --shadow: 0 1px 14px rgba(0,0,0,.22); --shadow-hi: 0 8px 30px rgba(0,0,0,.35);
-    --tshadow: none;
-  }
-}

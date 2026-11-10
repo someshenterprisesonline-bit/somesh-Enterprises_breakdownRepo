@@ -7,7 +7,7 @@ if (!base || !pin) throw new Error('Use python tests/run_browser.py --action-cen
   const browser = await chromium.launch({ headless: true, channel: process.env.BROWSER_CHANNEL || 'msedge' });
   const errors = [];
   async function pageFor(mobile = false) {
-    const ctx = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 }, reducedMotion: 'reduce', isMobile: mobile, hasTouch: mobile });
+    const ctx = await browser.newContext({colorScheme:process.env.TEST_THEME || 'light', viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 }, reducedMotion: 'reduce', isMobile: mobile, hasTouch: mobile });
     await ctx.route('https://fonts.googleapis.com/**', r => r.fulfill({ contentType: 'text/css', body: '' }));
     const page = await ctx.newPage(); page.setDefaultTimeout(15000); page.on('pageerror', e => errors.push(e.message));
     await page.goto(base); await page.locator('[data-login-toggle="admins"]').click();

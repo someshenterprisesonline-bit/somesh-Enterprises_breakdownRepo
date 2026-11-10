@@ -12,7 +12,7 @@ def main():
     app = AppFixture()
     try:
         info = app.seed_browser()
-        if "--excel" in sys.argv or '--all-employees' in sys.argv:
+        if "--excel" in sys.argv or '--all-employees' in sys.argv or "--themes" in sys.argv:
             from test_excel_workspace import sample
             from test_document_workspace import seed_documents
             info['excel'] = seed_documents(app, actual=bool(os.environ.get('EXCEL_REFERENCE_ROOT')),assign='--all-employees' not in sys.argv)
@@ -30,6 +30,7 @@ def main():
                    TEST_FIXTURE_INFO=json.dumps(info), TEST_ARTIFACT_DIR=str(app.root))
         script = 'all-employees-excel.cjs' if '--all-employees' in sys.argv else ("excel-workspace.cjs" if "--excel" in sys.argv else ("action-center.cjs" if "--action-center" in sys.argv else "browser.cjs"))
         if "--employees" in sys.argv: script = "employees.cjs"
+        if "--themes" in sys.argv: script = "theme-baseline.cjs" if os.environ.get("THEME_BASELINE") else "themes.cjs"
         result = subprocess.call(["node", str(PROJECT / "tests" / script)], env=env)
         if result == 0 and '--excel' in sys.argv:
             import openpyxl

@@ -8,7 +8,12 @@ const APP = "SOMESH ENTERPRISES";
 const COLORS = ["#0071e3", "#34c759", "#ff9500", "#af52de", "#ff2d55", "#5ac8fa", "#5856d6", "#ff3b30", "#30b0c7", "#a2845e"];
 const colorOf = (n) => COLORS[[...String(n)].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
 const initials = (n) => String(n).replace(/[^A-Za-z ]/g, " ").trim().split(/\s+/).map(p => p[0]).slice(-2).join("").toUpperCase();
-const avatar = (n) => `<span class="avatar" style="background:${colorOf(n)}">${esc(initials(n))}</span>`;
+const contrastInk = hex => {
+  const c = hex.replace('#', '').match(/../g).map(x => parseInt(x, 16) / 255).map(x => x <= .04045 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4);
+  const l = c[0] * .2126 + c[1] * .7152 + c[2] * .0722;
+  return (1.05 / (l + .05)) >= 4.5 ? '#ffffff' : '#000000';
+};
+const avatar = (n) => `<span class="avatar" style="background:${colorOf(n)};--avatar-ink:${contrastInk(colorOf(n))}">${esc(initials(n))}</span>`;
 
 const hdrs = () => ({ "Content-Type": "application/json", ...(S.token ? { "X-Session": S.token } : {}) });
 async function api(path, body) {

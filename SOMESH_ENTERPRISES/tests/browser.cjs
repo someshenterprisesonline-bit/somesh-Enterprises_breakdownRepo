@@ -11,7 +11,7 @@ if (!base || !pin) throw new Error('Run with python tests/run_browser.py');
     ...(process.env.BROWSER_CHANNEL || process.platform === 'win32' ? { channel: process.env.BROWSER_CHANNEL || 'msedge' } : {}) });
   const errors = [];
   async function pageFor(options = {}) {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce', ...options });
+    const context = await browser.newContext({colorScheme:process.env.TEST_THEME || 'light', viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce', ...options });
     await context.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
     const page = await context.newPage();
     page.setDefaultTimeout(15000);

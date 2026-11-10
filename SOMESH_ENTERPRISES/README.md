@@ -169,7 +169,7 @@ Useful BAT arguments:
 
 A local `/api/health` probe reports application version, SQLite connectivity and a hash identifying the checkout, without exposing credentials or filesystem paths. The launcher uses a lock to avoid racing starts and refuses an unrelated service on the configured port. Failure exit codes are preserved. No password is embedded in either BAT file.
 
-The UI follows the system light/dark preference through its existing theme variables. Attendance registers remain workflow tasks/documents; the application has no separate attendance/leave module. Existing assigned tasks support reassignment, progression and deletion; arbitrary editing of an already assigned task title is not an existing feature. Task templates can be edited before assignment.
+The Sun/Moon button on login and in every user header switches themes instantly. Preferences are saved separately for each profile on this browser; the login screen keeps its own preference. Without a saved choice, the app follows the system theme. Switching themes preserves open panels and drafts. Colors for controls, alerts and paper previews are defined in `frontend/css/theme.css`. Attendance registers remain workflow tasks/documents; the application has no separate attendance/leave module. Existing assigned tasks support reassignment, progression and deletion; arbitrary editing of an already assigned task title is not an existing feature. Task templates can be edited before assignment.
 
 Validation commands (run inside the project folder):
 
@@ -187,3 +187,7 @@ python tests/run_browser.py --all-employees
 ```
 
 Windows startup tests launch both BAT files against disposable synthetic databases in paths containing spaces. The tests stop only their own child processes; restricted environments may require permission for process cleanup. Private Excel-reference tests skip unless `EXCEL_REFERENCE_ROOT` is supplied. Destructive task/bill/demo tests use temporary databases, never the installed database. There is no configured frontend build or lint command: JavaScript is checked with `node --check`, Python with `compileall`, and behavior with the browser/API suites. See `docs/AUDIT_2026-11-10.md` for executed checks and limitations.
+
+Theme verification: `python tests/run_browser.py --themes` captures both themes and audits rendered text contrast in `data/theme-audit/`. Use `TEST_THEME=light` or `TEST_THEME=dark` with the core, Action Center and Excel browser suites. The theme suite also checks saved preferences across login/logout/refresh, keyboard access, cross-tab synchronization, storage restrictions and print styling. The generated screenshots and results remain local under ignored `data/`.
+
+The existing Windows BAT launcher already serves the latest tracked frontend and backend from this checkout, including `theme.js`, `theme.css`, Dynamic Island and employee management. No separate compiled frontend folder is used. Restart after backend changes; frontend assets use the existing no-cache static route. Live deployment settings, databases, screenshots and test evidence remain local and excluded from Git.

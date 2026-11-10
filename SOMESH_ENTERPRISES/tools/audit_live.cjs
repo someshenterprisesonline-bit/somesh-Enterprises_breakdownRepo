@@ -39,9 +39,10 @@ const base = process.env.TEST_BASE_URL || 'http://localhost:8080';
       assert.ok((await page.locator('main').innerText()).length > 0);
     }
     await page.locator('[data-tab=dash]').click(); await page.locator('#addEmployee').waitFor();
-    await page.emulateMedia({colorScheme:'light'});
+    if (await page.locator('html').getAttribute('data-theme') !== 'light') await page.locator('[data-theme-toggle]').click();
     const light = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-    await page.emulateMedia({colorScheme:'dark'});
+    await page.locator('[data-theme-toggle]').click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
     assert.notEqual(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), light);
     await page.setViewportSize({width:390,height:844});
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
