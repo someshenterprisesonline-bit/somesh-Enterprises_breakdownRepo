@@ -9,13 +9,14 @@ Frontend paths are under `frontend/`. Backend functions are in `backend/app.py` 
 
 | Page (tab) | Who sees it | Frontend file | Frontend functions | Backend routes | Backend functions |
 |---|---|---|---|---|---|
-| **Sign-in screen** | everyone | `js/core/shell.js` | `render()` (top part), `signIn`, `finishSignIn`, `logout` | `POST /api/login`, `/api/logout`, `GET /api/me`, `/api/meta` | `admin_pin_ok`, `new_session`, `session_user` |
+| **Sign-in screen** | everyone | `js/core/shell.js`, `js/core/login-and-admins.js` | `loginMarkup`, `wireLogin`, `startBrandIntro`, `signIn`, `finishSignIn`, `logout` | `POST /api/login`, `/api/logout`, `GET /api/me`, `/api/meta` | `verify_admin_pin`, `new_session`, `session_user` |
 | **My tasks** | everyone | `js/pages/my-tasks.js` | `viewMine` | `GET /api/state` | `state`, `task_view` |
 | **To check** | approvers, admins | `js/pages/my-tasks.js` | `viewCheck` | `GET /api/state` | `state` |
 | Task buttons on the cards (Start, Done, Approve, Send back, End, attach files) | everyone | `js/core/actions.js`, `js/core/components.js` | `act`, `dialog`, `taskCard`, `attachFiles` | `POST /api/tasks/<id>/claim, submit, approve, reject, end, upload, unupload` | `claim`, `submit`, `approve`, `reject`, `end_task`, `save_upload`, `timer_start`, `timer_stop` |
-| **Tracker** | admins | `js/pages/tracker.js` | `viewTracker`, `wireTracker` | `GET /api/tracker`, `/api/tracker/export`, `POST /api/lunch` | `tracker`, `tracker_xlsx`, `lunch_cfg` |
+| **Tracker** | admins | `js/pages/tracker.js` | `viewTracker`, `wireTracker`, `trShowPreview`, `trOpenEmployee`, `trWireTaskDisclosure`, `trDownload` | `GET /api/tracker`, `/api/tracker/export`, `/api/tracker/export.pdf`, `POST /api/lunch` | `tracker`, `tracker_xlsx`, `tracker_export.tracker_pdf`, `lunch_cfg` |
 | **Overview** | admins | `js/pages/overview.js` | `viewOverview` | `GET /api/pipeline` | `pipeline` |
 | **Dashboard** | admins | `js/pages/dashboard.js` | `viewDash`, `chartDaily`, `chartHeat`, `chartUtil`, `chartIdle`, `chartGap`, `gapTable`, `chartDept`, `chartTop`, `dashCsv`, `wireDash` | `GET /api/dashboard` | `dashboard`, `workday_cfg`, `available_seconds` |
+| **Action Center** | admins | `js/pages/action-center.js` | `viewActionCenter`, `wireActionCenter`, `sacLoad`, `sacOpenTask`, `sacOpenTracker` | `GET /api/action-center`, `/api/action-center/task/<id>`, `/api/action-center/export.xlsx`, `/api/action-center/export.pdf`; `POST /api/action-center/reassign` | `action_center_report`, `action_center_reassign`; `action_center.build_report`, `action_center.export_report` |
 | **Pipeline → Timetable** | admins | `js/pages/pipeline.js` | `viewPipe`, `viewTimetable`, `showTip`, `lanesOf` | `GET /api/timetable` | `timetable` |
 | **Pipeline → Bills × stages** | admins | `js/pages/pipeline.js` | `viewBills`, `billProgress`, `exportCsv` | `GET /api/pipeline` | `pipeline` |
 | **Pipeline → drag-and-drop repeatable tasks** | admins | `js/pages/pipeline-dragdrop.js` | `viewPalette`, `tplTip`, `giveTemplate`, `editTemplates`, `wirePalette` | `GET/POST /api/templates`, `POST /api/assign` | `templates`, `create_adhoc` (list in `config.json` → `task_templates`) |
@@ -32,6 +33,24 @@ Frontend paths are under `frontend/`. Backend functions are in `backend/app.py` 
 | Documents panel, file preview | admins | `js/core/components.js` | `showDocs`, `fileList`, `docsBtn`, `showPreview` | `GET /files/...`, `/api/preview` | `preview`, `task_files` |
 | Optional-tab menu (the ＋ button) | admins | `js/core/shell.js` | `tabMenu`, `OPTIONAL_TABS`, `shownTabs` | (none; remembered in the browser) | (none) |
 | Lunch lock screen | staff | `index.html` (`#lunch`), `js/core/utils.js` | `lunchWin`, `lunchNow`, `ticker` | `POST /api/tasks/...` refused at lunch | `is_lunch`, `lunch_window` |
+| Automation **rules** (When → If → Then; backend only so far) | admins | (UI comes in part 2) | | `GET /api/rules`, `POST /api/rules`, `POST /api/rules/<id>/toggle`, `/delete`, `/test`, `GET /api/rules/log?limit=50`, `GET /api/workflow-model` | see **Automation rules** below |
+
+## Automation rules (backend/app.py)
+
+Admins make rules: **When** something happens (a trigger), **If** the conditions match, **Then** do one or more actions in order.
+
+- **Tables:** `rules` (`trigger`, `conditions` JSON with the trigger's own value under `when`, `actions` JSON, `enabled`) and `rule_runs` (one row per firing or error). Both are in `SCHEMA`, so old databases upgrade by themselves. `seed_rules` adds 3 example rules, switched **off**, the first time the `rules` table is created.
+- **Lists of choices:** `TRIGGERS`, `CONDITIONS`, `ACTIONS` and `PLACEHOLDERS` (`{task} {person} {bill} {client} {dept} {minutes}`).
+- **Engine:** `fire_rules(trigger, task=None, bill_id=None, extra=None)` is called by `create_task` and `create_adhoc` (assigned, and started if Auto-start started it), `claim`, `submit`, `approve` (including bill complete), `reject`, `end_task` and `new_bill`. `rules_tick` checks the time-based triggers (`task_overdue`, `task_not_started`, `daily_at`) from `automation_loop` every 30 s.
+- **Helpers:** `rule_ctx` collects the facts, `rule_matches` checks the If part, `run_action` does one Then step, and `rule_move` / `least_busy` hand a task to someone else. `auto_start(tid, force=True)` starts a task even when the Auto-start setting is off.
+- **Safety:**
+  - Each rule runs inside `try`, so a broken rule only writes an `error` row in `rule_runs`.
+  - A rule fires at most once per task (or per bill, or per day for `daily_at`).
+  - Actions done by a rule never fire rules again (`RULE_CTX.on`).
+  - Demo bills are skipped unless the rule has `include_demo`.
+  - Every firing writes a `rule_runs` row and an Activity event "Rule '…' …".
+- **API helpers:** `validate_rule` and `save_rule` (clear `FlowError` messages), `rule_test` (dry run over the last 7 days; it changes nothing), `rules_meta` (everything a rule editor needs) and `workflow_model` (stages, live counts, and the rules that apply to each stage).
+- `wipe_all` (used by `--demo`) clears `rule_runs`, because task IDs start again from 1. The rules themselves stay.
 
 ## Shared files ⚠ (talk before changing)
 
@@ -75,3 +94,44 @@ Frontend paths are under `frontend/`. Backend functions are in `backend/app.py` 
 | `sessions` | sign-in tokens |
 
 Statuses are `assigned` → `in_progress` → `submitted` → `approved`; a sent-back task goes back to `in_progress`. For tasks an admin gave, `approved` + `ended_at` means the task is finished.
+
+Rule execution is serialized across scheduler and request threads. `rule_runs.trigger` records the trigger at firing time; deduplication uses rule, task and trigger. Malformed rules are isolated and logged as errors. API dry runs use current task details for historical events (they do not reconstruct past ownership or rework counts).
+
+
+## Admin Smart Action Center
+
+`backend/action_center.py` builds read-only projections from existing tasks, work logs, Activity, user profiles and stage definitions; there are no new tables. `app.py` validates filters, takes a consistent snapshot under the existing lock, and enforces Admin authorization on every new endpoint. Demo tasks and orphaned time-log references are excluded.
+
+- Outstanding task state/deadlines are live; assignment/completion/activity totals use the selected date. Ad-hoc completion requires End task; workflow completion uses approval. Submitted work is pending approval, never counted as completed.
+- Queue order: tasks overdue by at least 120 lunch-adjusted minutes, the current Admin's approvals, other overdue tasks, deadlines within 60 lunch-adjusted minutes, current corrections/document follow-ups, other approvers' submissions, then availability checks. Ties use lateness, deadline and task ID. Flags can overlap; queue cards are not duplicated.
+- Availability checks need open work, no recorded work/activity, today's configured working period, a 30-working-minute grace period, and no lunch. No leave/attendance register exists, so these are prompts to check availability, never absence findings.
+- Workload review means multiple overdue assignments or remaining configured task limits above one normal day's capacity. It is a planning indicator, not an effort prediction or performance score. Shared unclaimed work appears for each eligible owner, while task counts are unique.
+- Frontend reuses the existing SSE refresh and 30-second loader. Review uses original `/api/tasks/<id>/approve` and `/reject` endpoints; only the designated approver gets review controls. Reassignment requires explicit confirmation, a matching task snapshot, same-department destination and existing busy checks, then reuses `rule_move` to retain time history/approver and records an Activity event.
+- Related Alerts applies a task-ID filter to the existing recipient-scoped Alert Center, with an explicit Clear filter button. Employee navigation reuses the Tracker detail modal. Excel/PDF exports include the filtered summary, complete attention queue and employee workload; PDF uses bordered wrapping tables with repeating headers.
+- Regression checks: `tests/test_action_center.py`; optional `python tests/run_browser.py --action-center`. All mutations in tests use synthetic temporary databases.
+
+## Login and Admin access management
+
+`frontend/js/core/login-and-admins.js` supplies the Admin/Employees login accordion, cross-profile search, first-load CSS intro and `openAdminManagement` modal. `shell.js` keeps the existing PIN sign-in and adds Manage Admins beside the header controls. `main.js` starts the intro and refreshes public profile metadata while signed out.
+
+- `GET /api/admins` requires an authenticated Admin and returns existing users, Admin count and recent access audit entries.
+- `POST /api/admins/role` accepts `{user, admin: boolean, confirmation_pin}`. `change_admin_role` rechecks the acting Admin, validates the target and last-Admin guard under the shared lock, and checks the acting Admin's existing PIN with `verify_admin_pin` (five failed attempts per user in five minutes).
+- Roles remain in the existing `backend/users.json`, preserving all other profile fields and configured credentials. Changes invalidate the affected user's sessions and write `admin_access` Activity events with actor and timestamp. Login issuance and role updates share the lock; workflow imports also invalidate sessions when roles change and cannot remove the last Admin. No database migration is required.
+
+
+## Admin Alert Center and notification island
+
+`frontend/js/pages/alert-center.js` renders the recipient-scoped header island and Admin Alert Center (the employee Alerts sheet remains in `activity-alerts.js`). `shell.js` wires them on every Admin page. `live-and-load.js` reuses the existing SSE stream; refreshes are coalesced and a single 30-second check updates deadlines and expired snoozes. Opening Alerts never automatically marks Admin notifications read.
+
+- `GET /api/alerts`: Admin-only, all existing alerts addressed to that session user, grouped by task and event kind with every original message retained. `alert_center` derives priorities from live task deadlines/status, designated approver, current contract status and active workflow-input errors. Summary counts distinguish unread notifications from unresolved urgent issues and pending approval tasks.
+- `GET /api/alerts/<alert_id>/task`: Admin-only and recipient-checked; reuses `task_view` for workflow and admin-assigned tasks. Review actions call the existing task approve/reject routes, which still require the designated validator.
+- `POST /api/alerts/read`: existing route, now accepts optional `ids` for selected own alerts; omitting IDs preserves the existing mark-all behavior. It never changes tasks.
+- `POST /api/alerts/snooze`: Admin-only, own `ids` plus `minutes` (15, 60, 240 or 0 to undo). Urgent alerts cannot be snoozed; a task becoming overdue overrides an earlier snooze. The additive nullable `alerts.snoozed_until` migration preserves all existing alerts and read flags.
+- No alert history is deleted. Contract actions read existing authorized Storage data. UI refreshes abort on sign-out and stale task/contract responses cannot open another session's panel.
+
+
+### Island preview interaction
+
+The Admin header reserves a centered top dock for the fixed notification pill. Mouse hover opens its floating preview; leaving the pill and preview closes it after 300 ms, while touch/keyboard activation toggles it. The panel stays below header navigation, is at most 460 px wide and 65% of the visible viewport high, and scrolls internally.
+
+`acIslandCard` is the compact variant of `acCard`; the full Alerts page keeps its existing layout. Preview descriptions have separate `S.acIslandExpanded` state and only explicit Open task buttons invoke task navigation. `acWireIslandCards` handles captured pointer dragging and keyboard Up/Down reordering, suppresses release clicks, and defers live card repaint during a drag. Preferred display order is stored locally per Admin under `se_alert_island_order_<user>`. The preview still selects the backend's top five priority groups; neither priorities nor backend records are changed by ordering.

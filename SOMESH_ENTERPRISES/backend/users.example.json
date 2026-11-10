@@ -1,0 +1,72 @@
+{
+  "_about": "Synthetic starter profiles. Configure the local roster before use.",
+  "users": [
+    {
+      "name": "Admin 1",
+      "dept": "Executive Office",
+      "role": "CEO - approves every payment",
+      "admin": true
+    },
+    {
+      "name": "Employee 01",
+      "dept": "Operations",
+      "role": "EM - desk head"
+    },
+    {
+      "name": "Employee 02",
+      "dept": "Operations",
+      "role": "Billing executive"
+    },
+    {
+      "name": "Employee 03",
+      "dept": "Operations",
+      "role": "Bill delivery"
+    },
+    {
+      "name": "Employee 04",
+      "dept": "Operations",
+      "role": "Attendance intake"
+    },
+    {
+      "name": "Admin 2",
+      "dept": "Data Center",
+      "role": "EM - alerts, formats",
+      "admin": true
+    },
+    {
+      "name": "Employee 05",
+      "dept": "Data Center",
+      "role": "Scans & logs for Vault"
+    },
+    {
+      "name": "Employee 06",
+      "dept": "Finance, Contracts & Vault",
+      "role": "Worksheet, payments"
+    },
+    {
+      "name": "Employee 07",
+      "dept": "Finance, Contracts & Vault",
+      "role": "Tally entries"
+    },
+    {
+      "name": "Employee 08",
+      "dept": "Finance, Contracts & Vault",
+      "role": "Vault custodian"
+    },
+    {
+      "name": "Employee 09",
+      "dept": "Payroll",
+      "role": "Bank details, NEFT"
+    },
+    {
+      "name": "Employee 10",
+      "dept": "Payroll",
+      "role": "New staff details"
+    },
+    {
+      "name": "Employee 11",
+      "dept": "Payroll / Legal & Compliance",
+      "role": "EPF, ESI files; statutory filing"
+    }
+  ]
+}

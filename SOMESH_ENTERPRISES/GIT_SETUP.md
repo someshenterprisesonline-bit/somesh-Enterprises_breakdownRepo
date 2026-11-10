@@ -3,6 +3,8 @@
 Commands are for **Windows** (Command Prompt or Git Bash). They're the same on Mac and Linux.
 Replace `YOUR-GITHUB-NAME` with your GitHub username or organisation.
 
+For an existing clone, keep its current remote and history. Start with `git status`, `git branch -vv`, and `git remote -v`; skip Part A. The app in this repository lives under `SOMESH_ENTERPRISES/`.
+
 ---
 
 ## Part A · Owner (Somesh): put this code in a new repository, once
@@ -35,7 +37,7 @@ The first push opens a browser window to sign in to GitHub.
 
 **5. Recommended: protect `main`,** so nobody pushes to it directly and every change goes through a pull request. Go to Settings → **Branches** → Add branch protection rule → Branch name pattern `main` → tick **Require a pull request before merging** → Save.
 
-> **Keeping the old repository's history instead?** Open a terminal in your existing local clone and run `git rm -r -q .`. Copy everything from the new `SOMESH_ENTERPRISES` folder in, **including the hidden `.gitignore` and `.gitattributes` files**. Then run `git add .`, `git commit -m "Split into backend and frontend"` and `git push`. Git records it as one big change, and the old history stays.
+> **Updating an existing repository?** Keep the working tree and history intact. Review `git status` and `git diff`, apply only intended changes, test them, and stage explicit source paths on a feature branch. Do not remove the old tree wholesale or commit local databases, credentials, or private profile changes.
 
 ---
 
@@ -45,8 +47,8 @@ The first push opens a browser window to sign in to GitHub.
 git clone https://github.com/YOUR-GITHUB-NAME/somesh-enterprises.git
 cd somesh-enterprises
 ```
-Then double-click **`START SOMESH ENTERPRISES.bat`** in that folder. It installs Python and `openpyxl` if needed, and opens http://localhost:8080.
-For test data, double-click `reset_demo_data_windows.bat`. The admin PIN is `1234`.
+Then open the application folder and double-click **`START SOMESH ENTERPRISES.bat`**. It checks Python, `openpyxl` and ReportLab, and opens http://localhost:8080.
+For isolated automated test data, follow README.md. Admins use the existing deployment's configured PIN; do not publish or overwrite credentials.
 
 Read **README.md**, then **CODE_MAP.md**, which shows which file draws which page.
 

@@ -1,15 +1,14 @@
 {
-  "_about": "The Monthly Cycle stages. Change them from the app: Workflow input -> upload the Excel template, or a Google Sheet link / file path.",
   "stages": [
     {
       "code": "S01",
       "name": "Receive attendance",
       "dept": "Operations",
       "owners": [
-        "Moses",
-        "Ramya"
+        "Employee 02",
+        "Employee 04"
       ],
-      "validator": "Sudharsan",
+      "validator": "Employee 01",
       "sla_hours": 2,
       "next": [
         "S02"
@@ -21,9 +20,9 @@
       "name": "Mark in master tracker",
       "dept": "Data Center",
       "owners": [
-        "Somesh"
+        "Admin 2"
       ],
-      "validator": "Deeraj",
+      "validator": "Employee 05",
       "sla_hours": 1,
       "next": [
         "S03",
@@ -36,9 +35,9 @@
       "name": "Prepare worksheet",
       "dept": "Finance, Contracts & Vault",
       "owners": [
-        "Rupashri"
+        "Employee 06"
       ],
-      "validator": "Hemamalini",
+      "validator": "Employee 07",
       "sla_hours": 8,
       "next": [
         "S05",
@@ -52,9 +51,9 @@
       "name": "Attendance check",
       "dept": "Payroll",
       "owners": [
-        "Jagadeeshwari"
+        "Employee 10"
       ],
-      "validator": "Nandha",
+      "validator": "Employee 09",
       "sla_hours": 4,
       "next": [
         "S06"
@@ -75,9 +74,9 @@
       "name": "New staff details",
       "dept": "Payroll",
       "owners": [
-        "Jagadeeshwari"
+        "Employee 10"
       ],
-      "validator": "Thavamani",
+      "validator": "Employee 11",
       "sla_hours": 24,
       "next": [
         "S07"
@@ -89,9 +88,9 @@
       "name": "Tally entry",
       "dept": "Finance, Contracts & Vault",
       "owners": [
-        "Hemamalini"
+        "Employee 07"
       ],
-      "validator": "Rupashri",
+      "validator": "Employee 06",
       "sla_hours": 4,
       "next": [],
       "output": "Tally entries"
@@ -101,9 +100,9 @@
       "name": "Salary NEFT file",
       "dept": "Payroll",
       "owners": [
-        "Nandha"
+        "Employee 09"
       ],
-      "validator": "Jagadeeshwari",
+      "validator": "Employee 10",
       "sla_hours": 4,
       "next": [
         "S07"
@@ -119,9 +118,9 @@
       "name": "EPF / ESI files",
       "dept": "Payroll",
       "owners": [
-        "Thavamani"
+        "Employee 11"
       ],
-      "validator": "Nandha",
+      "validator": "Employee 09",
       "sla_hours": 4,
       "next": [
         "S09"
@@ -139,9 +138,9 @@
       "name": "Arrange bill set",
       "dept": "Operations",
       "owners": [
-        "Moses"
+        "Employee 02"
       ],
-      "validator": "Sudharsan",
+      "validator": "Employee 01",
       "sla_hours": 4,
       "next": [
         "S09"
@@ -153,9 +152,9 @@
       "name": "CEO payment approval",
       "dept": "Executive Office",
       "owners": [
-        "M. Sampath"
+        "Admin 1"
       ],
-      "validator": "M. Sampath",
+      "validator": "Admin 1",
       "sla_hours": 24,
       "next": [
         "S10",
@@ -172,9 +171,9 @@
       "name": "Deliver bill",
       "dept": "Operations",
       "owners": [
-        "Munro"
+        "Employee 03"
       ],
-      "validator": "Moses",
+      "validator": "Employee 02",
       "sla_hours": 24,
       "next": [
         "S11"
@@ -186,9 +185,9 @@
       "name": "Acknowledgement",
       "dept": "Operations",
       "owners": [
-        "Moses"
+        "Employee 02"
       ],
-      "validator": "Sudharsan",
+      "validator": "Employee 01",
       "sla_hours": 4,
       "next": [
         "S15"
@@ -200,9 +199,9 @@
       "name": "Payments",
       "dept": "Finance, Contracts & Vault",
       "owners": [
-        "Rupashri"
+        "Employee 06"
       ],
-      "validator": "Hemamalini",
+      "validator": "Employee 07",
       "sla_hours": 24,
       "next": [
         "S14"
@@ -214,9 +213,9 @@
       "name": "Statutory filing",
       "dept": "Legal & Compliance",
       "owners": [
-        "Thavamani"
+        "Employee 11"
       ],
-      "validator": "Sudharsan",
+      "validator": "Employee 01",
       "sla_hours": 48,
       "next": [
         "S15"
@@ -228,9 +227,9 @@
       "name": "Scan & log",
       "dept": "Data Center",
       "owners": [
-        "Deeraj"
+        "Employee 05"
       ],
-      "validator": "Somesh",
+      "validator": "Admin 2",
       "sla_hours": 4,
       "next": [
         "S16"
@@ -246,9 +245,9 @@
       "name": "Vault storage",
       "dept": "Finance, Contracts & Vault",
       "owners": [
-        "Harish"
+        "Employee 08"
       ],
-      "validator": "Rupashri",
+      "validator": "Employee 06",
       "sla_hours": 4,
       "next": [],
       "output": "Vault index entry"
