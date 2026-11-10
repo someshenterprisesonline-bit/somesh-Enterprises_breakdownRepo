@@ -30,3 +30,20 @@ credentials*.json
 *service-account*.json
 playwright-report/
 test-results/
+
+# Dependency trees, audit outputs and SQLite sidecars
+node_modules/
+*.db-wal
+*.db-shm
+*.log
+coverage/
+.coverage
+htmlcov/
+
+# Private deployment settings and live roster; safe .example.json files are versioned.
+/backend/config.json
+/backend/users.json
+/backend/workflow.json
+
+# Generated metadata from private office reference documents.
+/docs/EXCEL_TEMPLATE_STRUCTURE.json

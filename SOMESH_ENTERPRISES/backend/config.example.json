@@ -1,10 +1,9 @@
 {
-  "_about": "Edit and restart. Time limits run in real time; demo bills (loaded by an admin) run 60x faster on their own.",
+  "_about": "Local deployment settings. Set SOMESH_ADMIN_PIN or security.admin_pin privately; no default password is supplied.",
   "host": "0.0.0.0",
   "port": 8080,
   "security": {
-    "_about": "Admins (People sheet: Admin = Yes) sign in with a PIN. Change admin_pin, or give each admin their own in pins, e.g. {\"Somesh\": \"4821\"}. Restart after changing.",
-    "admin_pin": "1234",
+    "admin_pin": "",
     "pins": {}
   },
   "lunch": {
@@ -81,12 +80,13 @@
   "workflow_input": {
     "_about": "Set from the app (Workflow input page). location = Google Sheet link or file path. auto_reload_minutes = re-read it every N minutes (0 = only when you press Apply).",
     "location": "",
-    "auto_reload_minutes": 0
+    "auto_reload_minutes": 0,
+    "enabled": false
   },
   "storage": {
     "_about": "Data Center storage: Master Tracker, Contract Register and Vault. root = 'storage' (the storage folder in the project root, next to the .bat file) or a full path such as G:\\\\Shared drives\\\\Data Center\\\\SOMESH Storage. Restart after changing.",
     "enabled": true,
-    "root": "storage"
+    "root": ""
   },
   "automation": {
     "_about": "Set from the app's Automation page (admins).",
@@ -102,9 +102,9 @@
     "smtp_host": "smtp.gmail.com",
     "smtp_port": 587,
     "use_tls": true,
-    "username": "alerts@yourcompany.com",
-    "password": "APP-PASSWORD-HERE",
-    "from": "SOMESH ENTERPRISES <alerts@yourcompany.com>",
+    "username": "",
+    "password": "",
+    "from": "",
     "app_url": "http://YOUR-SERVER-IP:8080"
   },
   "ntfy": {
@@ -116,63 +116,6 @@
   "gather": {
     "_about": "Gather 2.0 Smart Objects. Place an Inbox (or a Signal light) in Gather, open its menu, copy the Webhook URL and secret (whsec_...) here. dept = show that department's open tasks; person = show one person's own tasks. Then run: python app.py --gather-test",
     "enabled": false,
-    "objects": [
-      {
-        "name": "Operations inbox",
-        "kind": "inbox",
-        "dept": "Operations",
-        "url": "PASTE-WEBHOOK-URL",
-        "secret": "whsec_PASTE"
-      },
-      {
-        "name": "Data Center inbox",
-        "kind": "inbox",
-        "dept": "Data Center",
-        "url": "PASTE-WEBHOOK-URL",
-        "secret": "whsec_PASTE"
-      },
-      {
-        "name": "Finance inbox",
-        "kind": "inbox",
-        "dept": "Finance, Contracts & Vault",
-        "url": "PASTE-WEBHOOK-URL",
-        "secret": "whsec_PASTE"
-      },
-      {
-        "name": "Payroll inbox",
-        "kind": "inbox",
-        "dept": "Payroll",
-        "url": "PASTE-WEBHOOK-URL",
-        "secret": "whsec_PASTE"
-      },
-      {
-        "name": "Legal inbox",
-        "kind": "inbox",
-        "dept": "Legal & Compliance",
-        "url": "PASTE-WEBHOOK-URL",
-        "secret": "whsec_PASTE"
-      },
-      {
-        "name": "CEO inbox",
-        "kind": "inbox",
-        "dept": "Executive Office",
-        "url": "PASTE-WEBHOOK-URL",
-        "secret": "whsec_PASTE"
-      },
-      {
-        "name": "Operations alarm light",
-        "kind": "signal",
-        "dept": "Operations",
-        "url": "PASTE-WEBHOOK-URL",
-        "secret": "whsec_PASTE"
-      },
-      {
-        "name": "Ramya's desk",
-        "kind": "inbox",
-        "person": "Ramya",
-        "url": "PASTE-WEBHOOK-URL",
-        "secret": "whsec_PASTE"
-      }
-    ]
+    "objects": []
   }
 }

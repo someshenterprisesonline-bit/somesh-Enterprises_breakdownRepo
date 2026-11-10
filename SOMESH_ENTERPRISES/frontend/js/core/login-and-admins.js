@@ -1,5 +1,52 @@
 // Login presentation and authenticated Admin management. Permissions stay on the server.
 "use strict";
+function employeeSection() {
+  if (!isAdmin()) return "";
+  const users = S.meta.users, departments = [...new Set(users.map(u => u.dept || "Other"))];
+  return `<section class="card employee-section"><div class="admin-manager-head"><h2>EMPLOYEES</h2><div class="actions"><button class="btn primary" id="addEmployee" type="button">+ Add Employee</button><button class="btn" id="manageEmployees" type="button" aria-expanded="${!!S.manageEmployees}">Manage Employees</button></div></div><input class="search" id="employeeSearch" aria-label="Search employees" placeholder="Search employees" value="${esc(S.employeeSearch || '')}">${departments.map(d => `<div data-employee-dept><h3 class="dept">${esc(d)}</h3><div class="people">${users.filter(u => (u.dept || 'Other') === d).map(u => `<article class="person" data-employee-card data-search="${esc(`${u.name} ${u.dept} ${u.role}`.toLowerCase())}">${avatar(u.name)}<span><b>${esc(u.name)}</b><small>${esc(u.designation || u.role)}</small><small>${u.admin ? 'Admin' : 'Employee'}</small>${S.manageEmployees ? `<span class="actions"><button class="btn" type="button" data-edit-employee="${esc(u.name)}">Edit</button><button class="btn" type="button" data-delete-employee="${esc(u.name)}">Delete</button></span>` : ''}</span></article>`).join('')}</div></div>`).join('')}</section>`;
+}
+function wireEmployees() {
+  if (!isAdmin()) return;
+  const add = $('#addEmployee'), manage = $('#manageEmployees'), search = $('#employeeSearch');
+  if (add) add.onclick = () => editEmployee();
+  if (manage) manage.onclick = () => { S.manageEmployees = !S.manageEmployees; render(); };
+  if (search) {
+    const filter = () => {
+      S.employeeSearch = search.value;
+      document.querySelectorAll('[data-employee-card]').forEach(c => c.hidden = !c.dataset.search.includes(search.value.trim().toLowerCase()));
+      document.querySelectorAll('[data-employee-dept]').forEach(d => d.hidden = ![...d.querySelectorAll('[data-employee-card]')].some(c => !c.hidden));
+    };
+    search.oninput = filter; filter();
+  }
+  document.querySelectorAll('[data-edit-employee]').forEach(b => b.onclick = () => editEmployee(S.meta.users.find(u => u.name === b.dataset.editEmployee)));
+  document.querySelectorAll('[data-delete-employee]').forEach(b => b.onclick = () => {
+    const u = S.meta.users.find(u => u.name === b.dataset.deleteEmployee);
+    dialog(`<h3>Delete employee: ${esc(u.name)}?</h3><p>This removes the profile from active lists and sign-in. Tasks, time records, documents and history will be preserved. Existing assignments may need reassignment.</p>${u.admin ? '<label class="f">Your Admin PIN<input class="in" name="confirmation_pin" type="password" required autocomplete="current-password"></label>' : ''}`, fd => saveEmployee({action: 'delete', original: u.name, confirmed: true, confirmation_pin: fd.get('confirmation_pin')}));
+  });
+}
+async function saveEmployee(body) {
+  try {
+    await api('/api/employees', body);
+    S.meta = await api('/api/meta'); await load();
+  } catch (e) { note('Employee change failed', e.message); }
+}
+function editEmployee(user) {
+  if (!isAdmin()) return;
+  const u = user || {};
+  // Keep validation errors and entered values in the form until a successful save.
+  const d = document.createElement('dialog'); d.id = 'employeeEditor'; d.className = 'admin-manager';
+  d.innerHTML = `<form><h2>${user ? 'Edit Employee' : 'Add Employee'}</h2>${[['name','Name',u.name],['designation','Designation',u.designation || u.role],['dept','Department',u.dept]].map(([key,label,value]) => `<label class="f">${label}<input class="in" name="${key}" value="${esc(value || '')}" maxlength="120" required></label>`).join('')}<label class="f">Role<select class="in" name="access_role"><option value="employee">Employee</option><option value="admin" ${u.admin ? 'selected' : ''}>Admin</option></select></label><label class="f">Your Admin PIN (required when changing Admin access)<input class="in" name="confirmation_pin" type="password" autocomplete="current-password"></label><p role="alert" class="employee-error"></p><div class="actions"><button class="btn" type="button" data-cancel>Cancel</button><button class="btn primary" type="submit">Save Employee</button></div></form>`;
+  document.body.append(d); d.onclose = () => d.remove(); d.querySelector('[data-cancel]').onclick = () => d.close();
+  d.querySelector('form').onsubmit = async e => {
+    e.preventDefault(); const button = d.querySelector('[type=submit]'); button.disabled = true;
+    try {
+      await api('/api/employees', {action: user ? 'edit' : 'add', original: u.name, ...Object.fromEntries(new FormData(e.target))});
+      d.close(); S.meta = await api('/api/meta'); await load();
+    } catch (error) { d.querySelector('.employee-error').textContent = error.message; }
+    finally { button.disabled = false; }
+  };
+  d.showModal();
+}
 function loginProfiles() {
   const q = (S.uq || "").trim().toLowerCase();
   return S.meta.users.filter(u => !q || `${u.name} ${u.role || ""} ${u.dept || ""}`.toLowerCase().includes(q));

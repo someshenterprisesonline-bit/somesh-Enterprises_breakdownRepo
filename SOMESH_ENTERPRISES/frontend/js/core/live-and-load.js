@@ -25,6 +25,7 @@ async function load() {
   if (S.user && isAdmin()) await refreshAlertCenter(false);
   if (!S.user) return;
   if (S.tab === "assign") { try { S.adhoc = await api("/api/adhoc"); } catch (e) {} }
+  if (S.tab === "action") await sacLoad(false);
   if (S.tab === "auto") await loadAuto();
   if (S.tab === "tracker") { try { S.tr = await api(trUrl()); } catch (e) {} }
   if (S.tab === "pipe" && (S.pv || "time") === "time") { try { S.tt = await api(ttUrl()); if (!S.tpls) S.tpls = (await api("/api/templates")).templates; } catch (e) {} }

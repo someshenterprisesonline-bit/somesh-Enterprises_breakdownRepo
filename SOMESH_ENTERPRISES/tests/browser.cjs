@@ -191,7 +191,11 @@ if (!base || !pin) throw new Error('Run with python tests/run_browser.py');
   await p.locator('[data-av="settings"]').click(); await p.locator('#aSave').click();
   await p.getByText('Automation saved', { exact: true }).waitFor();
   await p.locator('#moreTabs').click(); await p.locator('[data-opt="admin"]').check(); await p.locator('#shX').click();
-  await tab(p, 'admin'); await p.locator('#client').fill('Browser synthetic client'); await p.locator('#newBill').click();
+  await tab(p, 'admin'); await p.locator('#client').fill('Browser synthetic client');
+  await p.evaluate(() => render()); // SSE-style redraw must preserve an in-progress draft.
+  assert.equal(await p.locator('#client').inputValue(), 'Browser synthetic client');
+  const billResponse = p.waitForResponse(r => r.url().endsWith('/api/bills') && r.request().method() === 'POST');
+  await p.locator('#newBill').click(); assert.equal((await billResponse).status(), 200);
   await p.locator('#simOut').filter({ hasText: /opened/ }).waitFor();
   console.log('PASS Dashboard, Pipeline, Overview, Activity, Assign, approvals/tasks, workflow model, stage rule builder, dry run, save and Automation Settings');
 

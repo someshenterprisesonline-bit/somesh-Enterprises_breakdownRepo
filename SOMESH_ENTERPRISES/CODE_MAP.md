@@ -16,6 +16,7 @@ Frontend paths are under `frontend/`. Backend functions are in `backend/app.py` 
 | **Tracker** | admins | `js/pages/tracker.js` | `viewTracker`, `wireTracker`, `trShowPreview`, `trOpenEmployee`, `trWireTaskDisclosure`, `trDownload` | `GET /api/tracker`, `/api/tracker/export`, `/api/tracker/export.pdf`, `POST /api/lunch` | `tracker`, `tracker_xlsx`, `tracker_export.tracker_pdf`, `lunch_cfg` |
 | **Overview** | admins | `js/pages/overview.js` | `viewOverview` | `GET /api/pipeline` | `pipeline` |
 | **Dashboard** | admins | `js/pages/dashboard.js` | `viewDash`, `chartDaily`, `chartHeat`, `chartUtil`, `chartIdle`, `chartGap`, `gapTable`, `chartDept`, `chartTop`, `dashCsv`, `wireDash` | `GET /api/dashboard` | `dashboard`, `workday_cfg`, `available_seconds` |
+| **Action Center** | admins | `js/pages/action-center.js` | `viewActionCenter`, `wireActionCenter`, `sacLoad`, `sacOpenTask`, `sacOpenTracker` | `GET /api/action-center`, `/api/action-center/task/<id>`, `/api/action-center/export.xlsx`, `/api/action-center/export.pdf`; `POST /api/action-center/reassign` | `action_center_report`, `action_center_reassign`; `action_center.build_report`, `action_center.export_report` |
 | **Pipeline → Timetable** | admins | `js/pages/pipeline.js` | `viewPipe`, `viewTimetable`, `showTip`, `lanesOf` | `GET /api/timetable` | `timetable` |
 | **Pipeline → Bills × stages** | admins | `js/pages/pipeline.js` | `viewBills`, `billProgress`, `exportCsv` | `GET /api/pipeline` | `pipeline` |
 | **Pipeline → drag-and-drop repeatable tasks** | admins | `js/pages/pipeline-dragdrop.js` | `viewPalette`, `tplTip`, `giveTemplate`, `editTemplates`, `wirePalette` | `GET/POST /api/templates`, `POST /api/assign` | `templates`, `create_adhoc` (list in `config.json` → `task_templates`) |
@@ -96,6 +97,18 @@ Statuses are `assigned` → `in_progress` → `submitted` → `approved`; a sent
 
 Rule execution is serialized across scheduler and request threads. `rule_runs.trigger` records the trigger at firing time; deduplication uses rule, task and trigger. Malformed rules are isolated and logged as errors. API dry runs use current task details for historical events (they do not reconstruct past ownership or rework counts).
 
+
+## Admin Smart Action Center
+
+`backend/action_center.py` builds read-only projections from existing tasks, work logs, Activity, user profiles and stage definitions; there are no new tables. `app.py` validates filters, takes a consistent snapshot under the existing lock, and enforces Admin authorization on every new endpoint. Demo tasks and orphaned time-log references are excluded.
+
+- Outstanding task state/deadlines are live; assignment/completion/activity totals use the selected date. Ad-hoc completion requires End task; workflow completion uses approval. Submitted work is pending approval, never counted as completed.
+- Queue order: tasks overdue by at least 120 lunch-adjusted minutes, the current Admin's approvals, other overdue tasks, deadlines within 60 lunch-adjusted minutes, current corrections/document follow-ups, other approvers' submissions, then availability checks. Ties use lateness, deadline and task ID. Flags can overlap; queue cards are not duplicated.
+- Availability checks need open work, no recorded work/activity, today's configured working period, a 30-working-minute grace period, and no lunch. No leave/attendance register exists, so these are prompts to check availability, never absence findings.
+- Workload review means multiple overdue assignments or remaining configured task limits above one normal day's capacity. It is a planning indicator, not an effort prediction or performance score. Shared unclaimed work appears for each eligible owner, while task counts are unique.
+- Frontend reuses the existing SSE refresh and 30-second loader. Review uses original `/api/tasks/<id>/approve` and `/reject` endpoints; only the designated approver gets review controls. Reassignment requires explicit confirmation, a matching task snapshot, same-department destination and existing busy checks, then reuses `rule_move` to retain time history/approver and records an Activity event.
+- Related Alerts applies a task-ID filter to the existing recipient-scoped Alert Center, with an explicit Clear filter button. Employee navigation reuses the Tracker detail modal. Excel/PDF exports include the filtered summary, complete attention queue and employee workload; PDF uses bordered wrapping tables with repeating headers.
+- Regression checks: `tests/test_action_center.py`; optional `python tests/run_browser.py --action-center`. All mutations in tests use synthetic temporary databases.
 
 ## Login and Admin access management
 

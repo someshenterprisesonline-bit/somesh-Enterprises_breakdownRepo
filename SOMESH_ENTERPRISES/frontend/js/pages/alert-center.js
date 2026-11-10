@@ -28,11 +28,11 @@ function acSummary() {
 function viewAdminAlertCenter() {
   return hero("Admin Alert Center", "Your notifications, ordered by current task deadlines and approval status.", `<button class="btn" id="acReadAll" type="button">Mark all as read</button>`) +
     `<div id="acSummary" class="ac-summary">${acSummary()}</div><div class="toolbar ac-toolbar"><input class="search" id="alertSearch" aria-label="Search alerts" placeholder="Search employee, task or department" value="${esc(S.acQuery || "")}"><div class="seg" aria-label="Alert filters">${[["all", "All"], ["urgent", "Urgent"], ["approvals", "Approvals"], ["updates", "Updates"]].map(([key, label]) => `<button type="button" data-ac-filter="${key}" aria-pressed="${(S.acFilter || "all") === key}">${label}</button>`).join("")}</div><label class="small"><input type="checkbox" id="acShowSnoozed" ${S.acShowSnoozed ? "checked" : ""}> Include snoozed</label></div>
-      <div id="acStatus" class="muted small" role="status"></div><div id="alertFeed" class="ac-feed">${S.alertCenter ? acFeed() : skeleton("cards", 3)}</div>`;
+      ${S.acTaskFilter ? `<p class="small">Related alerts for task #${Number(S.acTaskFilter)} · only notifications addressed to you. <button class="btn" type="button" id="acClearTask">Clear task filter</button></p>` : ""}<div id="acStatus" class="muted small" role="status"></div><div id="alertFeed" class="ac-feed">${S.alertCenter ? acFeed() : skeleton("cards", 3)}</div>`;
 }
 function acFeed() {
   const query = (S.acQuery || "").trim().toLowerCase(), category = S.acFilter || "all";
-  const groups = acData().groups.filter(g => (S.acShowSnoozed || !g.snoozed) && (category === "all" || g.category === category) &&
+  const groups = acData().groups.filter(g => (!S.acTaskFilter || g.task?.id === S.acTaskFilter) && (S.acShowSnoozed || !g.snoozed) && (category === "all" || g.category === category) &&
     (!query || [g.client, g.task?.name, g.task?.stage, g.task?.person, g.task?.dept, ...g.records.flatMap(a => [a.title, a.body])].join(" ").toLowerCase().includes(query)));
   const limit = S.acLimit || 50;
   return groups.length ? groups.slice(0, limit).map(g => acCard(g)).join("") + (groups.length > limit ? `<button class="btn" type="button" data-ac-action="more">Show 50 more (${groups.length - limit} remaining)</button>` : "") :
@@ -53,6 +53,7 @@ function wireAdminAlertCenter() {
     document.querySelectorAll("[data-ac-filter]").forEach(button => button.onclick = () => { S.acFilter = button.dataset.acFilter; S.acLimit = 50; acPaintCenter(); });
     $("#acShowSnoozed").onchange = e => { S.acShowSnoozed = e.target.checked; acPaintCenter(); };
     $("#acReadAll").onclick = () => acRead(); acPaintCenter();
+    const clear = $("#acClearTask"); if (clear) clear.onclick = () => { S.acTaskFilter = null; S.acQuery = ""; render(); };
   }
 }
 function acWireActions(root) {
@@ -139,7 +140,7 @@ function startAlertCenterLive() {
 function stopAlertCenterLive(clear = false) {
   clearInterval(acPoll); clearTimeout(acTimer); acController?.abort(); acFlight = null; acDirty = false; acLastFetch = 0;
   closeAlertIsland(false, true);
-  if (clear) { S.acIslandOrder = null; S.acIslandOrderUser = null; S.acIslandExpanded = new Set(); S.alertCenter = null; S.acReviewTask = null; S.acError = ""; S.acExpanded = new Set(); S.acQuery = ""; S.acFilter = "all"; S.acShowSnoozed = false; S.seenAlertIds = new Set(); }
+  if (clear) { S.acTaskFilter = null; S.acIslandOrder = null; S.acIslandOrderUser = null; S.acIslandExpanded = new Set(); S.alertCenter = null; S.acReviewTask = null; S.acError = ""; S.acExpanded = new Set(); S.acQuery = ""; S.acFilter = "all"; S.acShowSnoozed = false; S.seenAlertIds = new Set(); }
 }
 function scheduleAlertCenterRefresh() {
   if (!S.user || !isAdmin()) return;

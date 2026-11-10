@@ -4,20 +4,24 @@ import os
 from xml.sax.saxutils import escape
 
 
-def tracker_pdf(tracker):
+def register_tracker_fonts():
     import reportlab
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    for name, filename in (("Tracker", "Vera.ttf"), ("TrackerBold", "VeraBd.ttf")):
+        if name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(name, os.path.join(os.path.dirname(reportlab.__file__), "fonts", filename)))
+
+
+def tracker_pdf(tracker):
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.platypus import SimpleDocTemplate, LongTable, Paragraph, Spacer, TableStyle
 
     # Use the fonts shipped with ReportLab, including on machines without system fonts.
-    for name, filename in (("Tracker", "Vera.ttf"), ("TrackerBold", "VeraBd.ttf")):
-        if name not in pdfmetrics.getRegisteredFontNames():
-            pdfmetrics.registerFont(TTFont(name, os.path.join(os.path.dirname(reportlab.__file__), "fonts", filename)))
+    register_tracker_fonts()
     normal = ParagraphStyle("cell", fontName="Tracker", fontSize=8, leading=11, splitLongWords=True)
     center = ParagraphStyle("time", parent=normal, alignment=TA_CENTER)
     header = ParagraphStyle("header", parent=normal, fontName="TrackerBold", textColor=colors.white)

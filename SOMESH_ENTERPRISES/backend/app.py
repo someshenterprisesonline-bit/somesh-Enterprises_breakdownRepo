@@ -19,13 +19,18 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import workflow_input as WI
 import storage as ST
+import excel_workspace as EW
 import shutil, secrets, math
 
 BASE = os.path.dirname(os.path.abspath(__file__))          # backend/  (code + config.json, users.json, workflow.json)
 ROOT = os.path.dirname(BASE)                               # project root (data/, storage/, samples/ live here)
 FRONTEND = os.path.join(ROOT, "frontend")                  # the web page: index.html, css/, js/, assets/
 def load(name):
-    with open(os.path.join(BASE, name), encoding="utf-8") as f:
+    path = os.path.join(BASE, name)
+    example = os.path.join(BASE, name.replace(".json", ".example.json"))
+    if not os.path.isfile(path) and name in ("config.json", "users.json", "workflow.json") and os.path.isfile(example):
+        shutil.copyfile(example, path)
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 def save(name, obj):
     path = os.path.join(BASE, name); tmp = path + ".tmp"
@@ -33,6 +38,8 @@ def save(name, obj):
     os.replace(tmp, path)
 
 CONFIG = load("config.json")
+if os.environ.get("SOMESH_ADMIN_PIN"):
+    CONFIG.setdefault("security", {})["admin_pin"] = os.environ["SOMESH_ADMIN_PIN"]
 FLOW = load("workflow.json")
 USERS = load("users.json")["users"]
 STAGES = {s["code"]: s for s in FLOW["stages"]}
@@ -119,6 +126,9 @@ def q(sql, args=()):
 def x(sql, args=()):
     with LOCK:
         cur = DB.execute(sql, args); DB.commit(); return cur.lastrowid
+
+import employee_management as EM
+EM.initialize(globals())
 
 # ------------------------------------------------------------------ live alerts (Server-Sent Events)
 SUBS = {}  # user -> [Queue]
@@ -708,7 +718,7 @@ def auto_start(tid, force=False):
     """Automation: start a new task straight away for the owner with the fewest tasks in progress.
     force=True is used by a rule's "start automatically" action, even when the Auto-start setting is off."""
     if not force and not auto_cfg().get("auto_start"): return None
-    t = get_task(tid); owners = json.loads(t["owners"])
+    t = get_task(tid); owners = [o for o in json.loads(t["owners"]) if o in USER_NAMES]
     if not owners: return None
     if is_tracked_adhoc(t):
         owners = [o for o in owners if not adhoc_busy(o, tid)]   # people still on another admin task wait
@@ -1336,6 +1346,49 @@ def task_view(t):
     d["worked_seconds"], d["timer_from"] = worked(t["id"])
     return d
 
+def action_center_report(actor, qs):
+    from action_center import build_report
+    value = lambda key, default="": (qs.get(key) or [default])[0]
+    try: day = datetime.strptime(value("date", now().date().isoformat()), "%Y-%m-%d").date()
+    except ValueError: raise FlowError("Choose a date in YYYY-MM-DD format")
+    if day > now().date(): raise FlowError("Choose today or an earlier date")
+    department, person = value("department"), value("person")
+    if department and department not in depts(): raise FlowError("Choose an existing department")
+    if person and person not in USER_NAMES: raise FlowError("Choose an existing employee")
+    workload, sort = value("workload", "all"), value("sort", "attention")
+    if workload not in ("all", "overloaded", "no_activity", "open"): raise FlowError("Choose a valid workload filter")
+    if sort not in ("attention", "name", "time", "pending"): raise FlowError("Choose a valid workload sort")
+    with LOCK:
+        return build_report(q("SELECT * FROM tasks"), q("SELECT * FROM work_log"),
+                            q("SELECT ts,actor,task_id FROM events WHERE substr(ts,1,10)=?", (day.isoformat(),)),
+                            [dict(u) for u in USERS], {t["stage"]: sdef(t["stage"]) for t in q("SELECT DISTINCT stage FROM tasks")},
+                            now(), day, dict(workday_cfg()), lunch_window(day), net_seconds, actor,
+                            department, person, value("q")[:200], workload, sort)
+
+
+def action_center_reassign(actor, body):
+    if not is_admin(actor): raise Denied("Only admins can reassign tasks")
+    if body.get("confirmed") is not True: raise FlowError("Confirm the reassignment first")
+    if type(body.get("task_id")) is not int or not 0 < body["task_id"] <= 9223372036854775807:
+        raise FlowError("Choose an existing task")
+    person, expected = body.get("person"), body.get("expected")
+    if not isinstance(person, str) or person not in USER_NAMES: raise FlowError("Choose an existing employee")
+    if not isinstance(expected, dict): raise FlowError("Reload the task before reassigning")
+    with LOCK:
+        t = get_task(body["task_id"])
+        current = {k: t[k] for k in ("status", "assignee", "claimed_at")}
+        current["owners"] = json.loads(t["owners"])
+        if expected != current: raise FlowError("This task changed. Reload it before reassigning")
+        if str(t["bill_id"] or "").startswith("DEMO-"): raise FlowError("Demo tasks are excluded from Action Center")
+        if t["status"] not in ("assigned", "in_progress"): raise FlowError("Only assigned or running tasks can be reassigned")
+        if not any(u["name"] == person and u.get("dept") == sdef(t["stage"]).get("dept") for u in USERS):
+            raise FlowError("Choose an employee in this task's department")
+        if t["assignee"] == person or (not t["assignee"] and current["owners"] == [person]): raise FlowError("This employee already owns the task")
+        detail = rule_move(t, person, actor)
+        log(t["bill_id"] or None, t["id"], "reassigned", actor, f"{actor} {detail}")
+    return {"ok": True}
+
+
 # Alert Center: recipient-scoped history, current workflow facts and non-destructive preferences.
 def alert_center(user):
     rows = q("SELECT * FROM alerts WHERE user=? AND (bill_id IS NULL OR bill_id NOT LIKE 'DEMO-%') ORDER BY id DESC", (user,))
@@ -1665,6 +1718,7 @@ def apply_definitions(parsed, actor, source, open_bills=True):
             with open(os.path.join(BASE, name), "rb") as a, open(os.path.join(bdir, f"{stamp}-{name}"), "wb") as b: b.write(a.read())
         except OSError: pass
     with LOCK:
+        EM.validate_roster(globals(), users)
         if not any(u.get("admin") for u in users): raise FlowError("Keep at least one active Admin")
         previous_roles = {u["name"]: bool(u.get("admin")) for u in USERS}
         changed_roles = {u["name"] for u in users if bool(u.get("admin")) != previous_roles.get(u["name"], False)}
@@ -1676,7 +1730,8 @@ def apply_definitions(parsed, actor, source, open_bills=True):
         STAGES.clear(); STAGES.update({st["code"]: st for st in flow["stages"]})
         ORDER[:] = [st["code"] for st in flow["stages"]]
         USERS[:] = users
-        USER_NAMES.clear(); USER_NAMES.update(u["name"] for u in users)
+        EM.sync(globals())
+        USER_NAMES.clear(); USER_NAMES.update(u["name"] for u in USERS)
         for st in flow["stages"]:   # open tasks follow the new owners and checker
             DB.execute("UPDATE tasks SET owners=?, validator=? WHERE stage=? AND status IN ('assigned','in_progress','submitted')",
                        (json.dumps(st["owners"]), st["validator"], st["code"]))
@@ -1803,6 +1858,7 @@ def change_admin_role(actor, body):
             if saved: save("users.json", original)
             raise
         USERS[:] = updated["users"]
+        EM.sync(globals())
     broadcast({"type": "reload"}); STORAGE_DIRTY.set(); GATHER_DIRTY.set()
     return admin_management()
 
@@ -1814,6 +1870,14 @@ def session_user(tok):
     if not tok: return None
     r = q("SELECT user FROM sessions WHERE token=?", (tok,))
     return r[0]["user"] if r and r[0]["user"] in USER_NAMES else None
+
+def parse_record_id(value):
+    try:
+        result = int(value)
+        if not 0 < result <= 9223372036854775807: raise ValueError()
+        return result
+    except (ValueError, TypeError): raise FlowError("Choose an existing record")
+
 
 class NeedLogin(Exception): pass
 class Denied(Exception): pass
@@ -1829,14 +1893,18 @@ class H(BaseHTTPRequestHandler):
         b = json.dumps(obj, default=str).encode()
         self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b)))
         self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(b)
-    def send_bytes(self, data, ctype, name=None, inline=False):
+    def send_bytes(self, data, ctype, name=None, inline=False, private=False):
         from urllib.parse import quote
         self.send_response(200); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(data)))
+        if private: self.send_header("Cache-Control", "no-store")
         if name: self.send_header("Content-Disposition", f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(name)}")
         self.end_headers(); self.wfile.write(data)
     def body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        return json.loads(self.rfile.read(n) or b"{}") if n else {}
+        try: n = int(self.headers.get("Content-Length") or 0)
+        except ValueError: raise FlowError("Invalid request length")
+        if not 0 <= n <= 15 * 1024 * 1024: raise FlowError("Request body must be at most 15 MB")
+        try: return json.loads(self.rfile.read(n) or b"{}") if n else {}
+        except (ValueError, UnicodeError): raise FlowError("Request body must contain valid JSON")
     def who(self, qs):
         tok = self.headers.get("X-Session") or (qs.get("t") or [""])[0]
         u = session_user(tok)
@@ -1866,6 +1934,11 @@ class H(BaseHTTPRequestHandler):
 
     def get(self, u, qs):
         parts = u.path.strip("/").split("/")
+        if u.path == "/api/excel" or u.path.startswith("/api/excel/"):
+            result = EW.get(globals(), self.who(qs), u.path, qs)
+            if isinstance(result, tuple):
+                return self.send_bytes(result[0], result[2] if len(result)>2 else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result[1], private=True)
+            return self.send_json(result)
         if u.path in ("/", "/index.html"):
             with open(os.path.join(FRONTEND, "index.html"), "rb") as f: b = f.read()
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(b)))
@@ -1877,6 +1950,10 @@ class H(BaseHTTPRequestHandler):
             with open(fp, "rb") as f: data = f.read()
             self.send_response(200); self.send_header("Content-Type", mimetypes.guess_type(fp)[0] or "application/octet-stream")
             self.send_header("Content-Length", str(len(data))); self.send_header("Cache-Control", "no-cache"); self.end_headers(); self.wfile.write(data); return
+        if u.path == "/api/health":
+            from launcher import instance_id
+            q("SELECT 1")
+            return self.send_json({"app": APP_NAME, "version": APP_VERSION, "instance": instance_id(ROOT), "database": "ok"})
         if u.path == "/api/meta":
             return self.send_json({"users": [{k: v for k, v in x_.items() if k != "email"} for x_ in USERS], "stages": FLOW["stages"],
                                    "demo_speed": speed(), "app_name": APP_NAME, "server_now": ts(), "start_stage": FLOW.get("start_stage"),
@@ -1894,6 +1971,8 @@ class H(BaseHTTPRequestHandler):
             if not alerts_: raise Denied("This alert is not available to your account")
             if not alerts_[0]["task_id"]: raise FlowError("This notification has no linked task")
             return self.send_json({"task": task_view(get_task(alerts_[0]["task_id"]))})
+        if u.path == "/api/employees":
+            self.need_admin(qs); return self.send_json({"users": USERS})
         if u.path == "/api/admins":
             self.need_admin(qs); return self.send_json(admin_management())
         if u.path == "/api/me":
@@ -1931,6 +2010,23 @@ class H(BaseHTTPRequestHandler):
             if not fp: return self.send_json({"error": "File not found"}, 404)
             return self.send_json(preview(fp))
         # ---- admin only from here
+        if u.path in ("/api/action-center", "/api/action-center/export.xlsx", "/api/action-center/export.pdf"):
+            actor = self.need_admin(qs)
+            report = action_center_report(actor, qs)
+            if u.path == "/api/action-center": return self.send_json(report)
+            from action_center import export_report
+            fmt = "pdf" if u.path.endswith(".pdf") else "xlsx"
+            content_type = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            return self.send_bytes(export_report(report, fmt), content_type, f"Operations_Summary_{report['date']}.{fmt}")
+        if len(parts) == 4 and parts[:3] == ["api", "action-center", "task"]:
+            self.need_admin(qs)
+            try:
+                tid = int(parts[3])
+                if not 0 < tid <= 9223372036854775807: raise ValueError()
+            except ValueError: raise FlowError("Choose an existing task")
+            t = get_task(tid)
+            if str(t["bill_id"] or "").startswith("DEMO-"): raise FlowError("Demo tasks are excluded from Action Center")
+            return self.send_json({"task": task_view(t)})
         if u.path == "/api/pipeline":
             self.need_admin(qs); return self.send_json(pipeline())
         if u.path == "/api/bill":
@@ -2008,6 +2104,13 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path); parts = u.path.strip("/").split("/"); qs = parse_qs(u.query)
         try:
+            if u.path.startswith("/api/excel/"):
+                actor = self.who(qs)
+                if int(self.headers.get("Content-Length") or 0) > 15 * 1024 * 1024:
+                    return self.send_json({"error": "Excel request exceeds 15 MB."}, 413)
+                b = self.body()
+                if not isinstance(b, dict): raise FlowError("Request body must be an object")
+                return self.send_json(EW.post(globals(), actor, u.path, b))
             b = self.body()
             if not isinstance(b, dict): raise FlowError("Request body must be an object")
             if u.path == "/api/login":
@@ -2024,7 +2127,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/alerts/snooze":
                 snooze_alerts(actor, b); return self.send_json({"ok": True})
             if len(parts) == 4 and parts[:2] == ["api", "tasks"]:
-                tid = int(parts[2]); act = parts[3]
+                tid = parse_record_id(parts[2]); act = parts[3]
                 if is_lunch() and not is_admin(actor):
                     c = lunch_cfg(); raise FlowError(f"Lunch break {c['start']}-{c['end']}: the app is locked. It opens again at {c['end']}.")
                 if act == "claim": claim(tid, actor)
@@ -2055,6 +2158,10 @@ class H(BaseHTTPRequestHandler):
                 storage_sync(); return self.send_json({"ok": True, "status": STORAGE_STATUS})
             # ---- admin only from here
             if not is_admin(actor): raise Denied("Only admins can do this")
+            if u.path == "/api/action-center/reassign":
+                return self.send_json(action_center_reassign(actor, b))
+            if u.path == "/api/employees":
+                return self.send_json(EM.change(globals(), actor, b))
             if u.path == "/api/admins/role":
                 return self.send_json({"ok": True, **change_admin_role(actor, b)})
             if u.path == "/api/bills":
@@ -2090,7 +2197,7 @@ class H(BaseHTTPRequestHandler):
                     rows.append({"name": name[:80], "hours": hours, "docs": bool(t.get("docs")), "about": str(t.get("about") or "")[:200]})
                 CONFIG["task_templates"] = rows; save("config.json", CONFIG); return self.send_json({"ok": True, "templates": rows})
             if len(parts) == 4 and parts[:2] == ["api", "admin-task"]:
-                tid = int(parts[2])
+                tid = parse_record_id(parts[2])
                 if parts[3] == "delete": delete_task(tid, actor); return self.send_json({"ok": True})
                 if parts[3] == "file":
                     rel, n = file_task_docs(tid); return self.send_json({"ok": True, "folder": rel, "files": n})
@@ -2205,10 +2312,12 @@ def main():
         out = os.path.join(ROOT, "samples", "Workflow_Input_Template.xlsx")
         with open(out, "wb") as f: f.write(WI.build(FLOW, USERS, [], speed()))
         print("Wrote", out); return
-    if "--demo" in sys.argv:     # demo data only when asked for (admins see it; staff never do)
-        load_demo()
     if "--gather-test" in sys.argv:
         gather_test(); return
+    host, port = CONFIG.get("host", "0.0.0.0"), int(CONFIG.get("port", 8080))
+    srv = ThreadingHTTPServer((host, port), H); srv.daemon_threads = True
+    if "--demo" in sys.argv:     # demo data only when asked for (admins see it; staff never do)
+        load_demo()
     threading.Thread(target=overdue_loop, daemon=True).start()
     threading.Thread(target=input_loop, daemon=True).start()
     threading.Thread(target=automation_loop, daemon=True).start()
@@ -2217,8 +2326,6 @@ def main():
     if CONFIG.get("gather", {}).get("enabled"):
         threading.Thread(target=gather_loop, daemon=True).start(); GATHER_DIRTY.set()
         print("Gather Smart Objects: on (" + str(len(CONFIG["gather"].get("objects", []))) + " objects)")
-    host, port = CONFIG.get("host", "0.0.0.0"), int(CONFIG.get("port", 8080))
-    srv = ThreadingHTTPServer((host, port), H); srv.daemon_threads = True
     ip = "<this-PC-IP>"
     try:
         import socket
@@ -2235,6 +2342,7 @@ def main():
         threading.Timer(1.5, lambda: webbrowser.open(f"http://localhost:{port}")).start()
     try: srv.serve_forever()
     except KeyboardInterrupt: print("Stopped.")
+    finally: srv.server_close()
 
 if __name__ == "__main__":
     main()

@@ -7,18 +7,15 @@ rem  3. starts the backend (backend\app.py), which also serves the
 rem     frontend folder, and opens it in the browser
 rem  Data is kept in .\data and files in .\storage (not in git).
 rem ==================================================================
-rem Re-open inside a window that stays open, so messages can always be read.
-if /i "%~1"=="--inner" goto main
-cmd /k call "%~f0" --inner %1
-exit /b
-
 :main
-setlocal EnableExtensions
+setlocal EnableExtensions DisableDelayedExpansion
+set "RC=1"
+set "NOPAUSE="
+for %%A in (%*) do if /i "%%~A"=="--no-pause" set "NOPAUSE=1"
 title SOMESH ENTERPRISES
 color F0
-cd /d "%~dp0"
-set "EXTRA="
-if /i "%~2"=="--demo" set "EXTRA=--demo"
+pushd "%~dp0"
+if errorlevel 1 exit /b 1
 echo.
 echo  ==========================================================
 echo     SOMESH ENTERPRISES  -  Monthly Cycle
@@ -62,6 +59,7 @@ echo  [OK] Python found: %PY%
 rem ---------- 2. Required packages
 if not exist "backend\requirements.txt" goto nofiles
 if not exist "backend\app.py" goto nofiles
+if not exist "backend\launcher.py" goto nofiles
 if not exist "frontend\index.html" goto nofiles
 %PY% -c "import openpyxl, reportlab" >nul 2>nul
 if not errorlevel 1 goto haveparts
@@ -83,7 +81,8 @@ echo  Keep this window open while people use the app.
 echo.
 
 rem ---------- 3. Run
-%PY% backend\app.py --open %EXTRA%
+%PY% backend\launcher.py %*
+set "RC=%ERRORLEVEL%"
 echo.
 echo  The app has stopped.
 goto done
@@ -99,8 +98,9 @@ goto done
 :done
 echo.
 echo  You can close this window.
-endlocal
-exit /b 0
+if not "%RC%"=="0" if not defined NOPAUSE pause
+popd
+endlocal & exit /b %RC%
 
 rem ---------- helpers
 :findpy

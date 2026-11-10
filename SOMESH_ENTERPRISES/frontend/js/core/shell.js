@@ -18,6 +18,8 @@ function tabMenu() {
 function logout(expired) {
   if (!expired && S.token) fetch("/api/logout", { method: "POST", headers: hdrs(), body: "{}" }).catch(() => {});
   stopAlertCenterLive(true);
+  S.smartAction = null; S.sacFilters = {}; S.sacFocus = "all"; S.sacError = ""; sacSequence++; clearTimeout(sacSearchTimer);
+  $("#employeeEditor")?.close(); S.manageEmployees = false; S.employeeSearch = ""; S.billDraft = null; S.billOpenStatus = null; S.openingBills = false;
   closeAdminManagement(); S.adminManagement = null; S.trTableHover = false; S.trTablePinned = false; S.loginGroup = null; S.uq = "";
   S.user = null; S.token = null; S.state = null; S.pipe = null; store.set("se_user", ""); store.set("se_token", ""); if (S.es) S.es.close(); closeSheet(); render();
   api("/api/meta").then(meta => { S.meta = meta; if (!S.user) render(); }).catch(() => {});
@@ -70,6 +72,8 @@ async function signIn(name) {
 }
 function render() {
   const app = $("#app");
+  xlPreserve();
+  if (XL.user && XL.user !== S.user) xlResetSession();
   if (!S.meta) { app.innerHTML = `<main>${skeleton("cards")}</main>`; return; }
   if (!S.user) {
     app.innerHTML = loginMarkup();
@@ -80,12 +84,13 @@ function render() {
   const alertUnread = isAdmin() ? acData().counts.unread : st.unread;
   const tabs = [["mine", "My tasks", st.mine.length]];
   if (isAdmin() || st.check.length || S.tab === "check") tabs.push(["check", "To check", st.check.length]);
-  if (isAdmin()) tabs.push(["tracker", "Tracker"], ["over", "Overview"], ["dash", "Dashboard"], ["pipe", "Pipeline"], ["log", "Activity"], ["alerts", "Alerts", alertUnread], ["assign", "Assign tasks"], ["auto", "Automation"]);
+  if (isAdmin()) tabs.push(["action", "Action Center"], ["tracker", "Tracker"], ["over", "Overview"], ["dash", "Dashboard"], ["pipe", "Pipeline"], ["log", "Activity"], ["alerts", "Alerts", alertUnread], ["assign", "Assign tasks"], ["auto", "Automation"]);
   if (isAdmin()) OPTIONAL_TABS.forEach(([k, l]) => { if (shownTabs().includes(k) || S.tab === k) tabs.push([k, l]); });
   else if (canStore()) tabs.push(["store", "Storage"]);
+  if (xlEligible()) tabs.push(["excel", "Excel Workspace"]);
   if (!tabs.some(t => t[0] === S.tab)) S.tab = "mine";
-  const body = { mine: viewMine, check: viewCheck, pipe: viewPipe, log: viewLog, alerts: viewAlerts, guide: viewGuide, admin: viewAdmin, input: viewInput, store: viewStore, over: viewOverview, assign: viewAssign, auto: viewAuto, tracker: viewTracker, dash: viewDash }[S.tab]();
-  const ae = document.activeElement, keep = ae && ["loc", "pq", "lq", "tq", "ttq", "dFrom", "dTo", "alertSearch"].includes(ae.id) ? { id: ae.id, v: ae.value, s: ae.selectionStart } : null;
+  const body = { excel: viewExcel, action: viewActionCenter, mine: viewMine, check: viewCheck, pipe: viewPipe, log: viewLog, alerts: viewAlerts, guide: viewGuide, admin: viewAdmin, input: viewInput, store: viewStore, over: viewOverview, assign: viewAssign, auto: viewAuto, tracker: viewTracker, dash: viewDash }[S.tab]();
+  const ae = document.activeElement, keep = ae && ["client", "sacSearch", "loc", "pq", "lq", "tq", "ttq", "dFrom", "dTo", "alertSearch"].includes(ae.id) ? { id: ae.id, v: ae.value, s: ae.selectionStart } : null;
   const focus = null;
   app.innerHTML = `<header>${isAdmin() ? `<div class="ac-island-dock">${alertIslandHtml()}</div>` : ""}<div class="bar"><div class="brand"><div class="logo">S</div><div><b style="display:flex;align-items:center;gap:8px">${APP}<i id="dot" class="dot ${S.es && S.es.readyState === 1 ? "on" : ""}" title="Live connection"></i></b></div></div>
       ${isAdmin() ? `<button class="btn ghost" id="manageAdmins" type="button">Manage Admins</button>` : ""}
@@ -93,7 +98,7 @@ function render() {
       ${!isAdmin() ? `<button class="btn" id="help" type="button" title="How it works" aria-label="How it works">?</button>` : ""}${isAdmin() ? "" : `<button class="btn bell" id="bell" type="button" aria-label="Alerts${st.unread ? `, ${st.unread} unread` : ""}">🔔${st.unread ? `<b>${st.unread}</b>` : ""}</button>`}
       <div class="me">${avatar(S.user)}<b class="small">${esc(S.user)}</b><button class="btn ghost" id="logout" type="button">Switch</button></div></div>
     ${tabs.length > 1 ? `<div class="tabsWrap"><div class="seg" role="tablist">${tabs.map(([k, l, n]) => `<button role="tab" aria-selected="${S.tab === k}" data-tab="${k}">${l}${n ? `<span class="n">${n}</span>` : ""}</button>`).join("")}${isAdmin() ? `<button type="button" id="moreTabs" title="Add or remove tabs" aria-label="Add or remove tabs" style="font-size:15px">＋</button>` : ""}</div></div>` : ""}${isAdmin() && lunchNow() ? `<div class="lunchbar">Lunch break: staff are locked and timers are paused until ${ampm((S.meta.lunch || {}).end || "14:00")}</div>` : ""}</header>
-    <main>${body}</main>`;
+    <main>${isAdmin() && S.tab === "dash" ? employeeSection() : ""}${body}${["mine", "dash"].includes(S.tab) ? xlDashboard() : ""}</main>`;
   if (keep) { const l = $("#" + keep.id); if (l) { l.value = keep.v; l.focus(); try { l.setSelectionRange(keep.s, keep.s); } catch (e) {} } }
   app.querySelectorAll("[data-bill]").forEach(b => b.onclick = () => loadBill(b.dataset.bill));
   const pq = $("#pq"); if (pq) pq.oninput = () => { S.pq = pq.value; render(); };
@@ -108,8 +113,9 @@ function render() {
   const ttd = $("#ttd"); if (ttd) ttd.onchange = () => { S.ttd = ttd.value; render(); };
   const ttB = $("#ttBusy"); if (ttB) ttB.onchange = () => { S.ttBusy = ttB.checked; render(); };
   app.querySelectorAll("[data-ttc]").forEach(b => b.onclick = () => { store.set("se_tt_compact", b.dataset.ttc); render(); });
-  app.querySelectorAll("[data-tab]").forEach(b => b.onclick = async () => { S.tab = b.dataset.tab; render(); if (S.tab === "alerts") { if (isAdmin()) refreshAlertCenter(); else api("/api/alerts/read", {}).then(load); } if (S.tab === "input") { try { S.wf = await api("/api/workflow"); } catch (e) {} } if (S.tab === "store") { try { S.st = await api("/api/storage"); } catch (e) {} } if (S.tab === "assign") { try { S.adhoc = await api("/api/adhoc"); } catch (e) {} } if (S.tab === "auto") await loadAuto(); if (S.tab === "tracker") { try { S.tr = await api(trUrl()); } catch (e) {} } if (S.tab === "pipe") { try { S.tt = await api(ttUrl()); if (!S.tpls) S.tpls = (await api("/api/templates")).templates; } catch (e) {} } if (S.tab === "dash") { render(); try { S.dash = await api(dashUrl()); } catch (e) {} } render(); });
+  app.querySelectorAll("[data-tab]").forEach(b => b.onclick = async () => { S.tab = b.dataset.tab; render(); if (S.tab === "alerts") { if (isAdmin()) refreshAlertCenter(); else api("/api/alerts/read", {}).then(load); } if (S.tab === "input") { try { S.wf = await api("/api/workflow"); } catch (e) {} } if (S.tab === "store") { try { S.st = await api("/api/storage"); } catch (e) {} } if (S.tab === "assign") { try { S.adhoc = await api("/api/adhoc"); } catch (e) {} } if (S.tab === "auto") await loadAuto(); if (S.tab === "action") await sacLoad(false); if (S.tab === "tracker") { try { S.tr = await api(trUrl()); } catch (e) {} } if (S.tab === "pipe") { try { S.tt = await api(ttUrl()); if (!S.tpls) S.tpls = (await api("/api/templates")).templates; } catch (e) {} } if (S.tab === "dash") { render(); try { S.dash = await api(dashUrl()); } catch (e) {} } render(); });
   $("#logout").onclick = () => logout();
+  wireEmployees();
   const manage = $("#manageAdmins"); if (manage) manage.onclick = openAdminManagement;
   $("#snd").onclick = () => { S.sound = !S.sound; store.set("se_sound", S.sound ? "on" : "off"); unlockAudio(); if (S.sound) beep(); render(); };
   const bell = $("#bell"); if (bell) bell.onclick = () => { if (isAdmin()) { S.tab = "alerts"; render(); refreshAlertCenter(); return; }
@@ -118,6 +124,7 @@ function render() {
   const mt = $("#moreTabs"); if (mt) mt.onclick = tabMenu;
   app.querySelectorAll("[data-docs]").forEach(b => b.onclick = () => showDocs(b.dataset.docs));
   app.querySelectorAll("[data-act]").forEach(b => b.onclick = () => act(b.dataset.act, Number(b.dataset.id)));
+  if (S.tab === "action") wireActionCenter();
   if (S.tab === "admin") wireAdmin();
   if (S.tab === "input" && isAdmin() && S.wf) wireInput();
   if (S.tab === "store" && S.st) wireStore();
@@ -126,6 +133,7 @@ function render() {
   if (S.tab === "auto" && S.autoCfg) wireAuto();
   if (S.tab === "pipe" && isAdmin()) { wirePalette(); const hd = app.querySelector("header"); if (hd) document.documentElement.style.setProperty("--hdr", hd.offsetHeight + "px"); }
   if (S.tab === "dash") wireDash();
+  wireExcel();
   wireAlertIsland();
   if (S.tab === "alerts" && isAdmin()) wireAdminAlertCenter();
   app.querySelectorAll("[data-deltask]").forEach(b => b.onclick = () => { const t = ((S.adhoc || {}).tasks || []).find(x => x.id === Number(b.dataset.deltask)); if (t) deleteTask(t); });

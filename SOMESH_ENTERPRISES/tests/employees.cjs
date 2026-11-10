@@ -1,0 +1,58 @@
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
+const assert = require('node:assert/strict');
+(async () => {
+  const browser = await chromium.launch({headless: true, channel: 'chrome'});
+  try {
+    const page = await browser.newPage({reducedMotion: 'reduce'}), errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto(process.env.TEST_BASE_URL);
+    await page.locator('[data-login-toggle="admins"]').click();
+    await page.locator('[data-user="Admin One"]').click();
+    await page.locator('#pin').fill(process.env.TEST_ADMIN_PIN);
+    await page.locator('#pinGo').click();
+    await page.locator('#addEmployee').waitFor();
+    const fill = async name => {
+      const form = page.locator('dialog.admin-manager form');
+      await form.locator('[name=name]').fill(name);
+      await form.locator('[name=designation]').fill('Coordinator');
+      await form.locator('[name=dept]').fill('New Department');
+      await form.getByText('Save Employee', {exact:true}).click();
+    };
+    await page.locator('#addEmployee').click(); await fill('Browser Employee');
+    await page.locator('[data-employee-card]').filter({hasText:'Browser Employee'}).waitFor();
+    await page.reload(); await page.locator('#addEmployee').waitFor();
+    assert.equal(await page.locator('[data-employee-card]').filter({hasText:'Browser Employee'}).count(), 1);
+    await page.locator('#addEmployee').click(); await fill(' browser employee ');
+    await page.locator('.employee-error').filter({hasText:'already exists'}).waitFor();
+    await page.locator('[data-cancel]').click();
+    await page.locator('#manageEmployees').click();
+    await page.locator('[data-edit-employee="Browser Employee"]').click(); await fill('Renamed Employee');
+    await page.locator('[data-delete-employee="Renamed Employee"]').click();
+    await page.locator('#dlgForm button[value=cancel]').click();
+    assert.equal(await page.locator('[data-delete-employee="Renamed Employee"]').count(), 1);
+    await page.locator('[data-delete-employee="Renamed Employee"]').click();
+    await page.locator('#dlgForm button[value=ok]').click();
+    await page.waitForFunction(() => !S.meta.users.some(u => u.name === 'Renamed Employee'));
+    await page.reload(); await page.locator('#addEmployee').waitFor();
+    assert.equal(await page.locator('[data-employee-card]').filter({hasText:'Renamed Employee'}).count(), 0);
+    await page.emulateMedia({colorScheme:'light'});
+    const light = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    await page.emulateMedia({colorScheme:'dark'});
+    const dark = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    assert.notEqual(light,dark);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme), 'dark');
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.locator('#addEmployee').isVisible(), true);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    await page.locator('#logout').click();
+    await page.locator('#uq').fill('Renamed Employee');
+    assert.equal(await page.locator('[data-user="Renamed Employee"]').count(), 0);
+    await page.locator('#uq').fill('Worker One');
+    await page.locator('[data-user="Worker One"]').click();
+    await page.locator('#logout').waitFor();
+    assert.equal(await page.locator('#addEmployee, #manageEmployees').count(), 0);
+    const status = await page.evaluate(async () => (await fetch('/api/employees', {method:'POST',headers:hdrs(),body:JSON.stringify({action:'delete',original:'Worker Two',confirmed:true})})).status);
+    assert.equal(status,403); assert.deepEqual(errors, []);
+    console.log('PASS Chrome: add, duplicate validation, edit, delete cancel/confirm, refresh persistence, login removal, mobile/dark UI, employee authorization; no page errors');
+  } finally { await browser.close(); }
+})().catch(e => { console.error(e); process.exitCode = 1; });
