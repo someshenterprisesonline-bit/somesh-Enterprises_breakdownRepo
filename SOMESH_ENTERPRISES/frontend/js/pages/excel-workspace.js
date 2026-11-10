@@ -186,3 +186,23 @@ class ExcelSection{
 window.addEventListener('beforeunload',e=>{if(xlDirty()){e.preventDefault();e.returnValue='';}});
 window.addEventListener('focus',()=>{if(S.tab==='excel')for(const p of XL.panels.values())if(p.open&&!p.dirty()&&!p.busy)p.run(()=>p.expand(p.pinned,true));});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')for(const p of XL.panels.values())p.root.classList.remove('xl-fullscreen');});
+// Live sync: another session saved a newer version of a document this browser can see. Clean panels reload in place;
+// a panel with unsaved edits keeps them and says so (its next save is still revision-checked and reports the conflict).
+async function xlRemoteChange(m){
+ if(!XL.node||XL.user!==S.user)return;
+ if(m.actor===S.user)await new Promise(r=>setTimeout(r,1500));   // let this browser's own save/NEFT flow settle first
+ const stale=p=>p.alive()&&p.book&&p.book.id===m.id&&p.book.revision<m.revision;
+ const known=XL.books.find(b=>b.id===m.id);
+ if(![...XL.panels.values()].some(stale)&&known&&known.revision>=m.revision)return;
+ try{await xlRefresh();}catch(e){}
+ const who=m.actor===S.user?'you in another window':(m.actor||'another user');
+ for(const p of XL.panels.values()){
+  if(!stale(p))continue;
+  p.run(async()=>{
+   if(!stale(p))return;
+   if(p.dirty()){xlStatus(`${p.title}: version ${m.revision} was saved by ${who}. Your unsaved edits are kept; saving will report a conflict, so reset your draft to load the new version.`,true);return;}
+   if(p.open){await p.expand(p.pinned,true);xlStatus(`${p.title} now shows version ${m.revision}, saved by ${who}.`);}
+   else{p.grid=null;p.document=null;}
+  });
+ }
+}

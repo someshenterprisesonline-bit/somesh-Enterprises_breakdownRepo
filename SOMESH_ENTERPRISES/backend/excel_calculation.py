@@ -233,6 +233,6 @@ def write_caches(data, results, previous=None):
                                 return cell.replace(b'<c ',b'<c t="'+kind+b'" ',1).replace(b'</c>',b'<v>'+html.escape(str(value),quote=False).encode()+b'</v></c>')
                             cell=cell.replace(b'</c>',b'<v>'+str(value).encode()+b'</v></c>')
                         return cell
-                    raw=re.sub(rb'<c\b[^>]*>.*?</c>',patch,raw,flags=re.S)
+                    raw=re.sub(rb'<c\b[^>]*(?<!/)>.*?</c>',patch,raw,flags=re.S)
                 dest.writestr(item,raw)
         return out.getvalue()

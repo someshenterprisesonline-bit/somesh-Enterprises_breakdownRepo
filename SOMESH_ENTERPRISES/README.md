@@ -9,7 +9,8 @@ A small office web app. It runs the monthly cycle: tasks, alerts, approvals, tim
 
 | On | Do this |
 |---|---|
-| Windows | Double-click **`START SOMESH ENTERPRISES.bat`**. It finds/installs Python and missing packages, checks the configured port, then starts the app and opens Chrome when available. |
+| Windows, Admin PC (server) | Double-click **`START SOMESH ENTERPRISES.bat`** (SERVER MODE). It finds/installs Python and missing packages, checks settings, the database and ports, backs up the database, then starts the app, prints the office LAN address and opens Chrome. |
+| Windows, employee PC | Double-click **`OPEN SOMESH ENTERPRISES (Employee PC).bat`**. It only opens Chrome at the Admin PC's address. See [Shared office setup](#shared-office-setup-one-admin-pc-many-employee-pcs). |
 | Windows, with demo data | Double-click **`reset_demo_data_windows.bat`**. |
 | Mac / Linux | `./start.sh` |
 | By hand | `pip install -r backend/requirements.txt`, then `python backend/app.py --open` |
@@ -24,6 +25,82 @@ Employee profile selection is the existing trusted-office authentication model, 
 Run every command from the **project root** (the folder with the .bat file), not from inside `backend/`.
 
 An optional virtual environment keeps packages separate: `python -m venv .venv`, activate it (`.venv\Scripts\activate` on Windows, `source .venv/bin/activate` on Mac/Linux), then run `python -m pip install -r backend/requirements.txt` and `python backend/app.py`.
+
+## Shared office setup (one Admin PC, many employee PCs)
+
+The Admin PC is the central host. It runs the single app process, which serves the web page, the API and the live-update stream on one port and keeps the one shared database (`data/monthly_cycle.db`, SQLite) and all Excel Workspace documents. Employee PCs only need **Google Chrome**: no Python, MySQL or Node.js. The app does not use MySQL. Nothing is exposed beyond the office network: the app refuses clients outside private (LAN/VPN) address ranges.
+
+```
+Employee PC (Chrome) ──https://ADMIN-IP:8443 or http://ADMIN-IP:8080──▶ Admin PC: backend/app.py
+                                                                         ├─ web page + /api + /stream (live updates)
+                                                                         ├─ data/monthly_cycle.db (SQLite, WAL)
+                                                                         └─ storage/ (Data Center files)
+```
+
+### Admin PC: install once
+
+1. Copy or clone the whole project folder to the Admin PC, for example `C:\SOMESH ENTERPRISES`. Keep the existing `data\`, `storage\` and `backend\config.json`, `users.json`, `workflow.json` when upgrading.
+2. Set the Admin PIN privately in `backend\config.json` → `security.admin_pin` (or the `SOMESH_ADMIN_PIN` environment variable).
+3. Give the Admin PC a fixed LAN address (a DHCP reservation in the office router is easiest) so employee bookmarks keep working.
+4. In **Windows Settings → Network & internet → (office Wi-Fi/Ethernet) → Properties**, set the network profile to **Private**. On a *Public* network Windows blocks employee PCs.
+5. Firewall (PowerShell **as Administrator**, once):
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File tools\office_firewall.ps1
+   ```
+   This allows TCP 8080 and 8443 from the local subnet on Private/Domain networks only. Add `-BlockMySQLFromLan` to also stop other computers reaching any MySQL server on this PC (3306/33060). This app never uses MySQL. If Windows earlier created "python.exe" allow rules for **Public** networks, review them in *Windows Defender Firewall → Inbound Rules*.
+6. HTTPS (recommended, so PINs never cross the network unencrypted):
+   ```powershell
+   python -m pip install --user cryptography
+   python tools\make_office_cert.py --enable
+   ```
+   Run this while the app is stopped. It creates a private office certificate authority and an HTTPS certificate for this PC's name and LAN addresses in `certs\` (excluded from Git), turns on the HTTPS listener (port 8443), and writes `certs\employee-pc-kit\`. Re-run it (without `--enable`) if the Admin PC's IP address changes. The CA is reused, so employee PCs do not need to reinstall it. Never copy `certs\office-ca.key` off the Admin PC.
+7. Start the app: double-click **`START SOMESH ENTERPRISES.bat`** (SERVER MODE). It checks Python and packages, settings, HTTPS files, database integrity and ports. It then backs up the database to `data\backups\startup-*` (the newest 14 are kept), starts the server, prints the **employee address** (for example `https://192.168.1.4:8443`) and opens Chrome at `http://localhost:8080`. Keep the window open: closing it stops the app for everyone. It reuses an already running server, never stops other programs, and never resets or reseeds data.
+
+### Employee PCs
+
+Copy `certs\employee-pc-kit\` (USB or a shared folder) to each employee PC and double-click **`OPEN SOMESH ENTERPRISES (Employee PC).bat`** inside it. The first time, it installs `office-ca.crt` for that Windows user (click **Yes** if Windows asks). It then checks the server is reachable and opens Chrome at the saved address. It never starts a server or database. Without the kit, open Chrome at the address shown in the SERVER MODE window and bookmark it. The CA certificate can also be downloaded from `http://ADMIN-IP:8080/office-ca.crt`; install it with `certutil -user -addstore Root office-ca.crt`.
+
+Once every employee PC trusts the office CA, set `network.https.redirect_lan_http` to `true` in `backend\config.json` (app stopped) so other PCs are always sent from `http://…:8080` to HTTPS. `http://localhost:8080` on the Admin PC keeps working.
+
+### Network and security settings (`backend\config.json` → `network`, all optional)
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `allowed_networks` | loopback, 10/8, 172.16/12, 192.168/16, link-local, IPv6 private | Client addresses allowed to use the app. Add `100.64.0.0/10` for a Tailscale VPN. Everything else gets HTTP 403. |
+| `session_days` | `30` | Sign-ins expire after this many days (`0` = never). |
+| `https.enabled` / `https.port` | `false` / `8443` | HTTPS listener (certificate from `tools\make_office_cert.py`). |
+| `https.redirect_lan_http` | `false` | Send other PCs from HTTP to HTTPS. |
+| `public_url` | empty | Address shown at startup, for example `https://somesh-admin:8443`. |
+| `allowed_origins` | empty | Extra web origins allowed to POST (normally none). |
+
+Every API call is checked on the server: the person comes from the session token, admin-only routes need an admin session, and Excel documents are visible only to their owner and admins. Browser POSTs from any other web origin are refused (`Cross-site request blocked.`), no CORS headers are sent, and responses carry `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy: no-referrer`. The database is a file used only by the app; there is no database port to expose and no database password. Employee sign-in remains profile selection, the existing trusted-office model, and Admins also need their PIN.
+
+### Live updates between computers
+
+After each successful change, the server pushes a small notice over Server-Sent Events (`/stream`), and each open browser re-reads only what it shows. This covers tasks (create, assign, start, submit, approve, return, delete), employees and admin roles, alerts and the Dynamic Island, the Tracker, Dashboard and Pipeline, lunch, automation settings, rules and templates, and Excel Workspace/NEFT versions. Notices are numbered and applied once. If the connection drops or the server restarts, the page reconnects by itself with back-off and refreshes once to catch up. Excel notices go only to the document's owner and admins (and Excel employees for shared templates). A clean open document reloads in place; one with unsaved edits keeps them and shows a conflict notice, and the next save is still revision-checked, so two people never silently overwrite each other. Large Excel sheets are paged by the server (50 rows a request), and JSON responses over 4 KB are gzip-compressed.
+
+### Backup and recovery
+
+- **Automatic:** every SERVER MODE start makes `data\backups\startup-YYYYMMDD-HHMMSS\` (the newest 14 are kept).
+- **Now:** double-click **`BACKUP SOMESH DATA.bat`**, or run `python tools\backup_db.py --dest "E:\SOMESH Backups" --keep 30`. Safe while the app runs.
+- **Nightly (recommended):** Task Scheduler → Create Basic Task → Daily → *Start a program* `python`, arguments `tools\backup_db.py --label nightly --keep 30 --dest "E:\SOMESH Backups"`, *Start in* the project folder.
+- Each backup folder has a consistent `monthly_cycle.db` (made with SQLite's online backup and integrity-checked), `config.json`, `users.json`, `workflow.json` and a `manifest.json` with row counts. The Data Center `storage\` folder is separate; copy it too, for example `robocopy storage "E:\SOMESH Backups\storage" /MIR`.
+- **Restore:** close the SERVER MODE window, then
+  ```powershell
+  python tools\restore_db.py "data\backups\startup-20261110-090000" --yes
+  ```
+  Add `--with-settings` to restore the three JSON files too. The current database is saved first as `data\backups\pre-restore-*`. The tool refuses while the app is running.
+- Backups contain personal data and the Admin PIN. Keep them on an access-controlled drive, never in Git or a public share (`data\` and `certs\` are excluded by `.gitignore`).
+
+### Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Employee PC: "can't be reached" | The SERVER MODE window is open; the network is **Private**; `tools\office_firewall.ps1` was run; the address matches the one printed at startup. |
+| "Your connection is not private" | `office-ca.crt` is not installed for that Windows user (run the employee launcher again), or the Admin PC's IP changed (re-run `tools\make_office_cert.py`). |
+| HTTP 403 "not on an approved office network" | The client address is outside `network.allowed_networks`. |
+| Red banner "connection lost" | The page reconnects automatically when the server is reachable again. |
+| Startup says the database check failed | Restore the latest good backup (above). |
 
 ## Folder structure
 
@@ -126,6 +203,8 @@ $env:PLAYWRIGHT_MODULE_PATH = 'C:\path\to\test-tools\node_modules\playwright'
 python tests/run_browser.py
 ```
 
+Shared-host checks: `python -m unittest tests.test_lan_sharing` (network allowlist, cross-site POSTs, sessions, sequenced/targeted live notices, HTTPS, backup/restore) and `python tests/run_browser.py --lan` (four separate Chrome sessions: live task assignment and start, admin settings, reconnection after an outage, Excel version sync and stale-save rejection).
+
 The runner starts a synthetic app on a free loopback port and closes it afterward. Set `BROWSER_CHANNEL` for another installed channel; on other platforms install Playwright's Chromium browser. No deployment PIN or installed database is used.
 
 ## Working on it
@@ -191,3 +270,17 @@ Windows startup tests launch both BAT files against disposable synthetic databas
 Theme verification: `python tests/run_browser.py --themes` captures both themes and audits rendered text contrast in `data/theme-audit/`. Use `TEST_THEME=light` or `TEST_THEME=dark` with the core, Action Center and Excel browser suites. The theme suite also checks saved preferences across login/logout/refresh, keyboard access, cross-tab synchronization, storage restrictions and print styling. The generated screenshots and results remain local under ignored `data/`.
 
 The existing Windows BAT launcher already serves the latest tracked frontend and backend from this checkout, including `theme.js`, `theme.css`, Dynamic Island and employee management. No separate compiled frontend folder is used. Restart after backend changes; frontend assets use the existing no-cache static route. Live deployment settings, databases, screenshots and test evidence remain local and excluded from Git.
+
+## NEFT sorting and automatic Worksheet synchronization
+
+In a private NEFT document, use **Sort NEFT by** and **Order**, or click the first three column headers, to sort S.No numerically, Name or Designation alphabetically, ascending/descending, or restore Original Order. Sorting moves complete employee rows. The selection persists in SQLite per document and sheet; current downloads reflect it. Original upload/version bytes remain unchanged.
+
+NEFT edits auto-save after a short pause. Entry, save, completed-file upload, row add/delete and sorting synchronize S.No, Name and Designation into the linked Worksheet in the displayed order. Salary Amount maps only to an editable Net Salary field with matching headers. Existing Net Salary formulas remain formulas. Completed uploads do not receive new formulas when rows are added.
+
+On first entry/import, each NEFT employee sheet gets its own private Worksheet from the configured shared Worksheet template. **Linked Worksheet** can explicitly select an existing private Worksheet belonging to the same owner, or create a new separate counterpart. Another user's files cannot be linked, even by an admin. Multiple NEFT sheets/documents never share a target. Configure an editable Worksheet template with S.No, Name of the Employees and Designation headers before using automatic synchronization.
+
+Stable row UUIDs keep payroll fields associated with employees through edits and sorting. Worksheet-only fields remain editable; saved fields and unsaved payroll drafts move with their employee. Repeated sync does not append duplicate employees. Manual overrides in mapped Worksheet fields block synchronization rather than being overwritten: the NEFT save is retained, the target is rolled back, and an error is shown. Resolve the mapped-cell conflict and choose **Retry sync**. Unsupported formula rearrangements also stop safely. Original files and saved document versions remain available through existing history/download controls. Worksheet edits never trigger reverse synchronization.
+
+The open linked Worksheet refreshes without reloading the page. Use **Open linked Worksheet** when a different document is already open. Status shows **Worksheet Synced** or a retryable error. The existing BAT launcher runs these source changes directly; restart it after backend updates. This application uses its existing plain JavaScript/Python HTTP service and SQLite storage, with no React build, FastAPI service or separate temporary production store.
+
+Run `python tests/run_browser.py --neft` with Playwright/Chrome configured as above; repeat with `$env:TEST_THEME='dark'`. These checks use disposable synthetic databases and verify manual entry, all sorts, unsaved payroll preservation, edits/undo, row addition/deletion, refresh/reopen, 100-row uploads, separate employee documents and both Excel downloads. Screenshots remain under ignored `data/neft-sync-audit/`. Backend/API tests are included in the normal unittest discovery command.

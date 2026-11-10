@@ -20,7 +20,8 @@ from urllib.parse import urlparse, parse_qs
 import workflow_input as WI
 import storage as ST
 import excel_workspace as EW
-import shutil, secrets, math
+import shutil, secrets, math, gzip, ssl
+import lan as LAN
 
 BASE = os.path.dirname(os.path.abspath(__file__))          # backend/  (code + config.json, users.json, workflow.json)
 ROOT = os.path.dirname(BASE)                               # project root (data/, storage/, samples/ live here)
@@ -40,6 +41,7 @@ def save(name, obj):
 CONFIG = load("config.json")
 if os.environ.get("SOMESH_ADMIN_PIN"):
     CONFIG.setdefault("security", {})["admin_pin"] = os.environ["SOMESH_ADMIN_PIN"]
+NET = LAN.settings(CONFIG)   # office LAN access, sessions and HTTPS (config.json -> network)
 FLOW = load("workflow.json")
 USERS = load("users.json")["users"]
 STAGES = {s["code"]: s for s in FLOW["stages"]}
@@ -88,6 +90,8 @@ def connect():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     c = sqlite3.connect(DB_PATH, check_same_thread=False)
     c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout=5000")       # backups and tools may read while the server writes
+    c.execute("PRAGMA journal_mode=WAL")        # readers (backup, reports) never block the office's writes
     had_rules = c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='rules'").fetchone()
     c.executescript(SCHEMA); migrate(c)
     if not had_rules: seed_rules(c)   # first run only: example rules, switched off
@@ -118,7 +122,14 @@ def migrate(c):
     if "snoozed_until" not in acols: c.execute("ALTER TABLE alerts ADD COLUMN snoozed_until TEXT")
     rcols = {r[1] for r in c.execute("PRAGMA table_info(rule_runs)")}
     if "trigger" not in rcols: c.execute("ALTER TABLE rule_runs ADD COLUMN trigger TEXT")
+    for name, target in INDEXES: c.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {target}")
     c.commit()
+# Additive indexes for the queries every signed-in browser repeats (state, tracker, alerts, sessions). Never drop data.
+INDEXES = [("ix_tasks_status", "tasks(status)"), ("ix_tasks_bill", "tasks(bill_id)"), ("ix_tasks_assignee", "tasks(assignee)"),
+           ("ix_tasks_validator", "tasks(validator, status)"), ("ix_work_log_task", "work_log(task_id)"),
+           ("ix_work_log_user", "work_log(user, end)"), ("ix_work_log_start", "work_log(start)"), ("ix_alerts_user", "alerts(user, read)"),
+           ("ix_events_bill", "events(bill_id)"), ("ix_events_kind", "events(kind)"), ("ix_sessions_user", "sessions(user)"),
+           ("ix_rule_runs_rule", "rule_runs(rule_id)")]
 DB = connect()
 def q(sql, args=()):
     with LOCK:
@@ -132,13 +143,44 @@ EM.initialize(globals())
 
 # ------------------------------------------------------------------ live alerts (Server-Sent Events)
 SUBS = {}  # user -> [Queue]
+BOOT = secrets.token_hex(4)          # lets browsers tell a restarted server's messages apart
+_SEQ = [0]; _SEQ_LOCK = threading.Lock()
+def stamp(payload):
+    if "seq" in payload: return payload
+    with _SEQ_LOCK:
+        _SEQ[0] += 1; return {**payload, "seq": _SEQ[0], "boot": BOOT}
 def push(user, payload):
+    payload = stamp(payload)
     for qu in list(SUBS.get(user, [])):
         try: qu.put_nowait(payload)
         except queue.Full: pass
 def broadcast(payload):
+    payload = stamp(payload)
     for user in list(SUBS):
         push(user, payload)
+def push_admins(payload):
+    payload = stamp(payload)
+    for user in list(SUBS):
+        if is_admin(user): push(user, payload)
+
+# Excel Workspace versions written during one POST are announced only after that request succeeds (committed), and
+# only to people who can see the document: its owner, admins, and for shared master templates the Excel employees.
+EXCEL_TOUCHED = threading.local()
+def excel_version_written(book, revision, actor):
+    pending = getattr(EXCEL_TOUCHED, "items", None)
+    if pending is not None: pending.append((dict(book), int(revision), actor))
+def flush_excel_changes(ok):
+    items = getattr(EXCEL_TOUCHED, "items", None) or []; EXCEL_TOUCHED.items = None
+    if not ok: return
+    latest = {}
+    for book, rev, actor in items:
+        if rev >= latest.get(book["id"], (None, -1, None))[1]: latest[book["id"]] = (book, rev, actor)
+    for bid, (book, rev, actor) in latest.items():
+        to = {book.get("owner")} | set(admins())
+        if book.get("master"): to |= {u["name"] for u in USERS if EW.allowed_employee(globals(), u["name"])}
+        msg = stamp({"type": "excel_changed", "id": bid, "revision": rev, "actor": actor})
+        for user in to:
+            if user: push(user, msg)
 
 # ------------------------------------------------------------------ outside channels
 def send_email(user, title, body):
@@ -1866,10 +1908,16 @@ def is_dc(name):
     return any(u["name"] == name and "data center" in u.get("dept", "").lower() for u in USERS)
 def new_session(user):
     tok = secrets.token_urlsafe(24); x("INSERT INTO sessions VALUES (?,?,?)", (tok, user, ts())); return tok
+def session_cutoff():
+    days = NET["session_days"]
+    return ts(now() - timedelta(days=days)) if days > 0 else ""
 def session_user(tok):
     if not tok: return None
-    r = q("SELECT user FROM sessions WHERE token=?", (tok,))
-    return r[0]["user"] if r and r[0]["user"] in USER_NAMES else None
+    r = q("SELECT user, created_at FROM sessions WHERE token=?", (tok,))
+    if not r: return None
+    if (r[0]["created_at"] or "") < session_cutoff():   # sessions expire after network.session_days (default 30)
+        x("DELETE FROM sessions WHERE token=?", (tok,)); return None
+    return r[0]["user"] if r[0]["user"] in USER_NAMES else None
 
 def parse_record_id(value):
     try:
@@ -1882,16 +1930,43 @@ def parse_record_id(value):
 class NeedLogin(Exception): pass
 class Denied(Exception): pass
 
+HTTPS_ON = [False]
+ADMIN_SYNC_PATHS = ("/api/rules", "/api/automation", "/api/templates", "/api/demo/clear")
+
 class H(BaseHTTPRequestHandler):
     server_version = f"SomeshEnterprises/{APP_VERSION}"
+    secure = False   # True on the HTTPS listener
     def log_message(self, *a): pass
 
     def handle(self):
         try: super().handle()
-        except ConnectionError: pass  # Closing a tab can abort an idle keep-alive socket on Windows.
+        except (ConnectionError, ssl.SSLError, TimeoutError): pass  # Closing a tab can abort an idle keep-alive socket on Windows.
+    def send_response(self, code, message=None):
+        self._status = code; super().send_response(code, message)
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff"); self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Referrer-Policy", "no-referrer")   # the live stream URL carries the session token
+        super().end_headers()
+    def guard(self, write):
+        """Office-LAN only, optional HTTP -> HTTPS redirect for other PCs, and same-origin POSTs (no cross-site use)."""
+        ip = self.client_address[0]
+        if not LAN.client_allowed(ip, NET):
+            self.send_json({"error": "This computer is not on an approved office network."}, 403); return False
+        path = urlparse(self.path).path
+        if (not self.secure and HTTPS_ON[0] and NET["https"]["redirect_lan_http"] and not LAN.is_loopback(ip)
+                and path not in ("/office-ca.crt", "/api/health")):
+            host = LAN.host_only(self.headers.get("Host")) or (LAN.lan_ipv4() or ["localhost"])[0]
+            self.send_response(308); self.send_header("Location", f"https://{host}:{NET['https']['port']}{self.path}")
+            self.send_header("Content-Length", "0"); self.end_headers(); return False
+        if write and not LAN.origin_ok(self.headers.get("Origin"), self.headers.get("Host"), NET["allowed_origins"]):
+            self.send_json({"ok": False, "error": "Cross-site request blocked."}, 403); return False
+        return True
     def send_json(self, obj, code=200):
         b = json.dumps(obj, default=str).encode()
+        gz = len(b) > 4096 and "gzip" in (self.headers.get("Accept-Encoding") or "")
+        if gz: b = gzip.compress(b, 5)
         self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b)))
+        if gz: self.send_header("Content-Encoding", "gzip"); self.send_header("Vary", "Accept-Encoding")
         self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(b)
     def send_bytes(self, data, ctype, name=None, inline=False, private=False):
         from urllib.parse import quote
@@ -1923,6 +1998,7 @@ class H(BaseHTTPRequestHandler):
         return fp
 
     def do_GET(self):
+        if not self.guard(False): return
         u = urlparse(self.path); qs = parse_qs(u.query)
         try: return self.get(u, qs)
         except NeedLogin: return self.send_json({"error": "Please sign in again", "login": True}, 401)
@@ -1953,7 +2029,12 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/api/health":
             from launcher import instance_id
             q("SELECT 1")
-            return self.send_json({"app": APP_NAME, "version": APP_VERSION, "instance": instance_id(ROOT), "database": "ok"})
+            return self.send_json({"app": APP_NAME, "version": APP_VERSION, "instance": instance_id(ROOT), "database": "ok",
+                                   "https_port": NET["https"]["port"] if HTTPS_ON[0] else None})
+        if u.path == "/office-ca.crt":   # public half of the office CA, for employee PCs to trust the HTTPS address
+            fp = os.path.join(ROOT, LAN.CA_FILE)
+            if not os.path.isfile(fp): return self.send_json({"error": "HTTPS has not been set up on this server"}, 404)
+            with open(fp, "rb") as f: return self.send_bytes(f.read(), "application/x-x509-ca-cert", "office-ca.crt")
         if u.path == "/api/meta":
             return self.send_json({"users": [{k: v for k, v in x_.items() if k != "email"} for x_ in USERS], "stages": FLOW["stages"],
                                    "demo_speed": speed(), "app_name": APP_NAME, "server_now": ts(), "start_stage": FLOW.get("start_stage"),
@@ -1985,7 +2066,7 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Connection", "keep-alive"); self.end_headers()
             qu = queue.Queue(maxsize=200); SUBS.setdefault(user, []).append(qu)
             try:
-                self.wfile.write(b": connected\n\n"); self.wfile.flush()
+                self.wfile.write(b"retry: 3000\n: connected\n\n"); self.wfile.flush()
                 while True:
                     try:
                         msg = qu.get(timeout=15)
@@ -2102,6 +2183,15 @@ class H(BaseHTTPRequestHandler):
         self.send_json({"error": "Not found"}, 404)
 
     def do_POST(self):
+        if not self.guard(True): return
+        self._status = None; EXCEL_TOUCHED.items = []
+        try: self.post()
+        finally:
+            ok = self._status == 200
+            flush_excel_changes(ok)
+            if ok and urlparse(self.path).path.startswith(ADMIN_SYNC_PATHS): push_admins({"type": "refresh"})
+
+    def post(self):
         u = urlparse(self.path); parts = u.path.strip("/").split("/"); qs = parse_qs(u.query)
         try:
             if u.path.startswith("/api/excel/"):
@@ -2262,6 +2352,12 @@ class H(BaseHTTPRequestHandler):
         except Exception as e:
             print("error:", repr(e)); self.send_json({"ok": False, "error": "Server error: " + str(e)}, 500)
 
+class HS(H):
+    secure = True
+    def setup(self):
+        self.request.settimeout(15); self.request.do_handshake(); self.request.settimeout(None)   # SSE streams stay open
+        super().setup()
+
 def preview(fp):
     """First rows of a spreadsheet / CSV / text file, so a checker can glance at it without downloading."""
     ext = os.path.splitext(fp)[1].lower()
@@ -2316,6 +2412,15 @@ def main():
         gather_test(); return
     host, port = CONFIG.get("host", "0.0.0.0"), int(CONFIG.get("port", 8080))
     srv = ThreadingHTTPServer((host, port), H); srv.daemon_threads = True
+    x("DELETE FROM sessions WHERE created_at < ?", (session_cutoff(),))   # expired sign-ins
+    https = NET["https"]
+    if https["enabled"]:
+        try:
+            ctx = LAN.tls_context(LAN.resolve(ROOT, https["cert"]), LAN.resolve(ROOT, https["key"]))
+            tls = LAN.TLSServer((host, https["port"]), HS, ctx)
+            threading.Thread(target=tls.serve_forever, daemon=True).start(); HTTPS_ON[0] = True
+        except (OSError, ssl.SSLError, ValueError) as e:
+            print(f"HTTPS is enabled in config.json but could not start on port {https['port']}: {e}")
     if "--demo" in sys.argv:     # demo data only when asked for (admins see it; staff never do)
         load_demo()
     threading.Thread(target=overdue_loop, daemon=True).start()
@@ -2326,15 +2431,14 @@ def main():
     if CONFIG.get("gather", {}).get("enabled"):
         threading.Thread(target=gather_loop, daemon=True).start(); GATHER_DIRTY.set()
         print("Gather Smart Objects: on (" + str(len(CONFIG["gather"].get("objects", []))) + " objects)")
-    ip = "<this-PC-IP>"
-    try:
-        import socket
-        sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); sk.connect(("10.255.255.255", 1)); ip = sk.getsockname()[0]; sk.close()
-    except Exception: pass
+    ips = LAN.lan_ipv4() or ["<this-PC-IP>"]
     print("=" * 64)
     print(f"  {APP_NAME} is running")
     print(f"  On this PC:      http://localhost:{port}")
-    print(f"  Other office PCs: http://{ip}:{port}")
+    for ip in ips:
+        if HTTPS_ON[0]: print(f"  Other office PCs: https://{ip}:{https['port']}" + ("" if https["redirect_lan_http"] else f"   (or http://{ip}:{port})"))
+        else: print(f"  Other office PCs: http://{ip}:{port}")
+    if NET["public_url"]: print(f"  Office address:   {NET['public_url']}")
     print("  Keep this window open. Close it (or press Ctrl+C) to stop the app.")
     print("=" * 64)
     if "--open" in sys.argv:

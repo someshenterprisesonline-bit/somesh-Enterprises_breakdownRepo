@@ -34,7 +34,9 @@ const names=['Nandha','Jagadeeshwari','Sudharsan','Rupashri'],categories=['neft'
     const root=p.locator(`[data-section="${category}"]`);await root.locator('.xl-title').hover();await sectionReady(p,category);
     assert.ok(await root.evaluate(e=>e.classList.contains('is-open')));
     if(category!=='letter'){
-     assert.ok((await root.locator('[data-cell]').evaluateAll(es=>es.map(e=>e.value))).every(v=>v===''));
+     const autoLinked=category==='worksheet'&&await p.evaluate(()=>!XL.panels.get('worksheet').preview&&!!XL.panels.get('neft').grid?.neft?.target);
+     if(autoLinked)assert.ok((await root.locator('[data-cell]').evaluateAll(es=>es.map(e=>e.value))).some(v=>v===name+' neft saved in new tab'));
+     else assert.ok((await root.locator('[data-cell]').evaluateAll(es=>es.map(e=>e.value))).every(v=>v===''));
      await root.locator('.xl-grid thead').hover();assert.ok(await root.evaluate(e=>e.classList.contains('xl-large')));
      await root.locator('.xl-grid tbody input').first().hover();assert.ok(await root.evaluate(e=>e.classList.contains('is-open')));
     }else{

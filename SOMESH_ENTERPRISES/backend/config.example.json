@@ -2,6 +2,29 @@
   "_about": "Local deployment settings. Set SOMESH_ADMIN_PIN or security.admin_pin privately; no default password is supplied.",
   "host": "0.0.0.0",
   "port": 8080,
+  "network": {
+    "_about": "Shared office (LAN) access. allowed_networks: only these client addresses may use the app (default: this PC and private office ranges, never the internet). session_days: sign-ins expire after this many days (0 = never). public_url: the address to show and to put in email links, e.g. https://192.168.1.20:8443. https: run tools/make_office_cert.py first; redirect_lan_http sends other PCs from http:8080 to https once every employee PC trusts office-ca.crt. allowed_origins: extra web origins allowed to POST (normally empty).",
+    "allowed_networks": [
+      "127.0.0.0/8",
+      "::1/128",
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+      "169.254.0.0/16",
+      "fc00::/7",
+      "fe80::/10"
+    ],
+    "session_days": 30,
+    "public_url": "",
+    "allowed_origins": [],
+    "https": {
+      "enabled": false,
+      "port": 8443,
+      "cert": "certs/server.crt",
+      "key": "certs/server.key",
+      "redirect_lan_http": false
+    }
+  },
   "security": {
     "admin_pin": "",
     "pins": {}

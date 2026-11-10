@@ -22,5 +22,5 @@
     hideTip(); const ct = $("#chTip"); if (ct) ct.classList.remove("show");
     if ($("#toasts").children.length) dismissAll();
   });
-  setInterval(() => { if (!S.user || (S.tab !== "action" && document.activeElement && document.activeElement.tagName === "INPUT")) return; if (["action", "over", "pipe", "tracker", "dash"].includes(S.tab)) load(); else if (["mine", "check"].includes(S.tab)) render(); }, 30000);
+  setInterval(() => { if (!S.user || document.hidden || (S.tab !== "action" && document.activeElement && document.activeElement.tagName === "INPUT")) return; if (["action", "over", "pipe", "tracker", "dash"].includes(S.tab)) load(); else if (["mine", "check"].includes(S.tab)) render(); }, 30000);
 })();

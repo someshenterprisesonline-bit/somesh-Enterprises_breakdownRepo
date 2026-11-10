@@ -62,7 +62,11 @@ Admins make rules: **When** something happens (a trigger), **If** the conditions
 | `frontend/js/core/utils.js` | date and time helpers, `fileUrl`, `today`, `trUrl`, `ttUrl` | Used by everything |
 | `frontend/css/app.css` | all styles. Sections are in this order: base, components, timetable, sheet, then v2 (buttons, palette, dashboard). | Add new styles at the **end** under a comment with your page name, so merges don't clash. |
 | `frontend/index.html` | page skeleton + the `<script>` list | A new JS file must be added to the list **before** `js/core/actions.js`, and `main.js` must stay last. |
-| `backend/app.py` → `class H` (`get` / `do_POST`) | all API routes in one place | Add new routes next to related ones. In `do_POST`, admin-only routes go **after** the line `if not is_admin(actor): raise Denied("Only admins can do this")`. |
+| `backend/app.py` → `class H` (`get` / `post`) | all API routes in one place. `do_GET`/`do_POST` first run `guard()` (office-network allowlist, optional HTTP→HTTPS redirect, same-origin POSTs); `do_POST` then calls `post()` and, only if the response was 200, sends Excel `excel_changed` notices and admin refreshes for `ADMIN_SYNC_PATHS`. | Add new routes next to related ones. In `post()`, admin-only routes go **after** the line `if not is_admin(actor): raise Denied("Only admins can do this")`. A new admin-only settings route that other admins should see live: add its prefix to `ADMIN_SYNC_PATHS`. |
+| `backend/app.py` → `push` / `broadcast` / `push_admins` / `stamp` | live notices over `/stream` (SSE); every notice gets `seq` + `boot` so browsers apply it once | Shared by every module that changes data. `log()` already broadcasts a refresh. |
+| `backend/lan.py` | `network` settings: allowed client networks, Origin check, HTTPS listener (`TLSServer`), LAN address list | Used by `app.py`, `launcher.py` and `tools/make_office_cert.py`. |
+| `backend/launcher.py`, `START SOMESH ENTERPRISES.bat` | SERVER MODE: checks, automatic startup backup, start, LAN addresses | `OPEN SOMESH ENTERPRISES (Employee PC).bat` is the client-only launcher. |
+| `tools/backup_db.py`, `tools/restore_db.py`, `tools/make_office_cert.py`, `tools/office_firewall.ps1` | online backup/restore, office CA + HTTPS certificate, Windows Firewall rule | See README "Shared office setup". |
 | `backend/config.json`, `workflow.json`, `users.json` | live settings | Changing them affects everyone. Don't commit test edits. |
 
 ## Recipes

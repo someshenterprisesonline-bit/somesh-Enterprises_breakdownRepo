@@ -1,10 +1,16 @@
 @echo off
 rem ==================================================================
-rem  SOMESH ENTERPRISES - one-click start
+rem  SOMESH ENTERPRISES - SERVER MODE (run this on the Admin PC only)
 rem  1. finds Python 3.9+ (installs Python 3.12 if missing)
 rem  2. installs the required packages if missing (backend\requirements.txt)
-rem  3. starts the backend (backend\app.py), which also serves the
-rem     frontend folder, and opens it in the browser
+rem  3. backend\launcher.py checks settings, HTTPS files, database
+rem     integrity and ports, backs up the database, then starts
+rem     backend\app.py (frontend + API + live updates on one port),
+rem     prints the office LAN address and opens Chrome.
+rem  It reuses a running server, never stops other programs and
+rem  never resets or reseeds data.
+rem  Employee PCs use "OPEN SOMESH ENTERPRISES (Employee PC).bat",
+rem  which only opens Chrome at this PC's address.
 rem  Data is kept in .\data and files in .\storage (not in git).
 rem ==================================================================
 :main
@@ -12,13 +18,13 @@ setlocal EnableExtensions DisableDelayedExpansion
 set "RC=1"
 set "NOPAUSE="
 for %%A in (%*) do if /i "%%~A"=="--no-pause" set "NOPAUSE=1"
-title SOMESH ENTERPRISES
+title SOMESH ENTERPRISES - SERVER MODE
 color F0
 pushd "%~dp0"
 if errorlevel 1 exit /b 1
 echo.
 echo  ==========================================================
-echo     SOMESH ENTERPRISES  -  Monthly Cycle
+echo     SOMESH ENTERPRISES  -  SERVER MODE (Admin PC)
 echo  ==========================================================
 echo.
 echo  Folder: %CD%
@@ -76,8 +82,9 @@ goto done
 :haveparts
 echo  [OK] Required packages installed
 echo.
-echo  Starting the app. Your browser opens in a few seconds.
-echo  Keep this window open while people use the app.
+echo  Starting the server. Chrome opens in a few seconds.
+echo  Keep this window open while people use the app: closing it
+echo  stops the app for every office PC.
 echo.
 
 rem ---------- 3. Run

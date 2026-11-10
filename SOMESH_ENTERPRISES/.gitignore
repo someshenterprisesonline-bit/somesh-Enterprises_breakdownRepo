@@ -47,3 +47,7 @@ htmlcov/
 
 # Generated metadata from private office reference documents.
 /docs/EXCEL_TEMPLATE_STRUCTURE.json
+
+# Office HTTPS: CA private key, server key/certificate and the employee kit (stay on the Admin PC)
+/certs/
+somesh-server-url.txt

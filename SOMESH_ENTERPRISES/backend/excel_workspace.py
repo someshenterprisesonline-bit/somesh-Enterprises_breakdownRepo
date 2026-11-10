@@ -13,6 +13,7 @@ import uuid
 import zipfile
 import excel_calculation as CALC
 import word_workspace as WORD
+import neft_sync as NS
 from datetime import datetime, date, time
 from decimal import Decimal, InvalidOperation
 
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS ew_template_access(slot INTEGER,user TEXT,
 def init(g):
     db = g['DB']
     db.executescript(SCHEMA)
+    NS.init(g)
     columns = {r[1] for r in db.execute('PRAGMA table_info(ew_books)')}
     for column, declaration in [('format', "TEXT DEFAULT 'xlsx'"), ('category', "TEXT DEFAULT ''"), ('origin', "TEXT DEFAULT 'existing'"), ('schema_json', "TEXT DEFAULT '{}'")]:
         if column not in columns:
@@ -169,13 +171,27 @@ def data_for(g, b, revision=None):
     return bytes(v[0])
 
 
-def commit(g, b, actor, data, changes):
+def write_version(g, b, actor, data, changes):
     rev = b['revision'] + 1
     stamp = g['ts']()
     g['DB'].execute('INSERT INTO ew_versions VALUES (?,?,?,?,?,?)', (b['id'], rev, data, actor, stamp, json.dumps(changes, default=str)))
     g['DB'].execute('UPDATE ew_books SET revision=?,editor=?,modified=? WHERE id=?', (rev, actor, stamp, b['id']))
-    g['DB'].commit()
+    g.get('excel_version_written', lambda *_: None)(b, rev, actor)  # live sync: announced after the request succeeds
     return {'ok': True, 'id': b['id'], 'revision': rev}
+
+
+def commit(g, b, actor, data, changes):
+    try:
+        current = dict(g['DB'].execute('SELECT * FROM ew_books WHERE id=?', (b['id'],)).fetchone())
+        result = write_version(g, current, actor, data, changes)
+        current['revision'] = result['revision']
+        status = NS.after_commit(g, actor, current, data, changes)
+        if status is not None: result['neft_sync'] = status
+        g['DB'].commit()
+        return result
+    except Exception:
+        g['DB'].rollback()
+        raise
 
 
 def check_revision(g, b, body):
@@ -292,7 +308,10 @@ def _get(g, actor, path, qs):
         b = template_book(g,actor,bid) if template and path.endswith(('/metadata','/sheet','/document')) else book(g, actor, bid, 'download' if path.endswith('/download') else 'view')
         if path.endswith('/download'):
             extension=b.get('format') or 'xlsx'
-            return (data_for(g, b, int(arg('version', '0')) or None), filename(arg('filename',b['name']),extension), 'application/vnd.openxmlformats-officedocument.'+('wordprocessingml.document' if extension=='docx' else 'spreadsheetml.sheet'))
+            download_data = data_for(g, b, int(arg('version', '0')) or None)
+            if category(b) == 'neft' and not b['master'] and not int(arg('version', '0')):
+                download_data = NS.export(g, b, download_data)
+            return (download_data, filename(arg('filename',b['name']),extension), 'application/vnd.openxmlformats-officedocument.'+('wordprocessingml.document' if extension=='docx' else 'spreadsheetml.sheet'))
         if path.endswith('/history'):
             return {'versions': [dict(r) for r in g['DB'].execute('SELECT revision,actor,stamp,changes FROM ew_versions WHERE book=? ORDER BY revision DESC', (bid,))]}
         data=data_for(g,b);schema=json.loads(b.get('schema_json') or '{}')
@@ -302,7 +321,7 @@ def _get(g, actor, path, qs):
             fail(g,'Choose the document editor for Word files.')
         w = read(data, g)
         if path.endswith('/metadata'):
-            return {'book': public(b), 'sheets': metadata(w)}
+            return {'employee_rows': [dict(r) for r in g['DB'].execute('SELECT m.source_id AS row_id,m.position,l.target_sheet AS sheet FROM ew_neft_members m JOIN ew_neft_links l ON l.book=m.book AND l.sheet=m.sheet WHERE l.target=?', (b['id'],))], 'book': public(b), 'sheets': metadata(w), 'neft_sheets': {s.title: NS.describe(g, b, s) for s in w if NS.describe(g, b, s)}}
         if path.endswith('/sheet'):
             name = arg('sheet', w.sheetnames[0])
             if name not in w.sheetnames:
@@ -311,11 +330,16 @@ def _get(g, actor, path, qs):
             offset = max(0, int(arg('offset', '0'))); limit = min(100, max(1, int(arg('limit', '50'))))
             query = arg('q').casefold(); col = int(arg('column', '0')); exact = arg('filter').casefold()
             indices = list(range(info['header_end'] + 1, s.max_row + 1))
+            neft = NS.describe(g, b, s)
+            if neft:
+                lo, hi = NS.bounds(s)
+                indices = NS.order(g, b, s, list(range(lo, hi + 1))) + list(range(hi + 1, s.max_row + 1))
             if query or exact:
                 columns = s.max_column
-                indices = [row[0].row for row in s.iter_rows(min_row=info['header_end'] + 1, max_col=columns)
+                matched = {row[0].row for row in s.iter_rows(min_row=info['header_end'] + 1, max_col=columns)
                            if (not query or any(query in str(c.value if c.value is not None else '').casefold() for c in row))
-                           and (not exact or (1 <= col <= columns and exact in str(row[col - 1].value or '').casefold()))]
+                           and (not exact or (1 <= col <= columns and exact in str(row[col - 1].value or '').casefold()))}
+                indices = [r for r in indices if r in matched]
             if arg('sort'):
                 sc = min(s.max_column, max(1, int(arg('sort'))))
                 def key(r):
@@ -324,6 +348,10 @@ def _get(g, actor, path, qs):
                 indices.sort(key=key, reverse=arg('direction') == 'desc')
             result={'book': public(b), 'sheet':s.title, **info, 'columns': s.max_column, 'total': len(indices), 'offset': offset,
                     'rows': [{'number': r, 'cells': [cell_json(c, b, g['is_admin'](actor), info['header_end']) for c in s[r]]} for r in indices[offset:offset + limit]]}
+            result['neft'] = neft
+            registry = {r['position']: r['id'] for r in g['DB'].execute('SELECT id,position FROM ew_neft_rows WHERE book=? AND sheet=? AND active=1', (b['id'], s.title))}
+            target_registry = {r['position']: r['source_id'] for r in g['DB'].execute('SELECT m.position,m.source_id FROM ew_neft_members m JOIN ew_neft_links l ON l.book=m.book AND l.sheet=m.sheet WHERE l.target=? AND l.target_sheet=?', (b['id'], s.title))}
+            for row in result['rows']: row['row_id'] = registry.get(row['number']) or target_registry.get(row['number'])
             cached={} if template else CALC.cached(openpyxl.load_workbook(io.BytesIO(data),data_only=True))
             result=decorate_cells(result,w,cached,schema.get(s.title,{}))
             if template or b.get('origin')=='blank':
@@ -421,7 +449,7 @@ def change_row(g, w, s, op, b, admin):
         fail(g, 'Choose a data row within the worksheet.')
     if action == 'add' and end >= 100000:
         fail(g, 'Row limit reached.')
-    if s.tables or s._charts or s._images or len(s.conditional_formatting):
+    if s.tables or s._charts or s._images or (len(s.conditional_formatting) and not NS.columns(s, True)):
         fail(g, 'This sheet has tables, drawings or conditional formatting. Use Excel for structural row changes.')
     if any((m.min_row < row <= m.max_row if action=='add' else m.min_row <= row <= m.max_row) for m in s.merged_cells.ranges):
         fail(g, 'Merged header and summary rows cannot be inserted into or deleted. Choose an ordinary data row.')
@@ -438,6 +466,7 @@ def change_row(g, w, s, op, b, admin):
     merges = [str(m) for m in s.merged_cells.ranges]
     for m in merges:
         s.unmerge_cells(m)
+    cf_rules = [(str(key.sqref), copy.deepcopy(rules)) for key, rules in s.conditional_formatting._cf_rules.items()]
     dimensions = {r: copy.copy(d) for r, d in s.row_dimensions.items()}
     if action == 'add':
         s.insert_rows(row)
@@ -453,6 +482,15 @@ def change_row(g, w, s, op, b, admin):
         shifted = shift_reference(m, s.title, s.title, row, delta)
         if shifted != '#REF!':
             s.merge_cells(shifted)
+    if cf_rules:
+        from openpyxl.formatting.formatting import ConditionalFormattingList
+        s.conditional_formatting = ConditionalFormattingList()
+        for ranges, rules in cf_rules:
+            shifted = [shift_reference(ref, s.title, s.title, row, delta) for ref in ranges.split()]
+            shifted = [ref for ref in shifted if ref != '#REF!']
+            for rule in rules:
+                if rule.formula: rule.formula = [shift_formula('=' + f.lstrip('='), s.title, s.title, row, delta).lstrip('=') for f in rule.formula]
+                if shifted: s.conditional_formatting.add(' '.join(shifted), rule)
     for ws in w:
         for cells in ws:
             for c in cells:
@@ -472,7 +510,7 @@ def change_row(g, w, s, op, b, admin):
     if action == 'add':
         for col, (style, formula, origin) in enumerate(pattern, 1):
             c = s.cell(row, col); c._style = style
-            if formula:
+            if formula and b.get('origin') != 'upload':
                 formula = shift_formula(formula, s.title, s.title, row, delta)
                 shifted_origin = shift_reference(origin, s.title, s.title, row, delta)
                 c.value = Translator(formula, origin=shifted_origin).translate_formula(c.coordinate)
@@ -488,6 +526,9 @@ def _post(g, actor, path, body):
         admin = g['is_admin'](actor)
         db = g['DB']
         try:
+            if path.endswith('/neft'):
+                b = book(g, actor, body.get('id'), 'edit'); check_revision(g, b, body)
+                return NS.command(g, actor, b, body)
             if path.endswith('/blank'):
                 source=template_book(g,actor,body.get('id'),'edit')
                 if not admin and not source['can_edit']:raise g['Denied']('This template is view-only.')
