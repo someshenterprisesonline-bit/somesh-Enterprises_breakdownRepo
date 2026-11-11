@@ -53,7 +53,12 @@ class Calculator:
             return c.value
         self.stack.add(key)
         try:
-            if not any(t.subtype=='RANGE' for t in Tokenizer(c.value).items) and not any(x.value not in (None,'') and x.data_type!='f' for x in self.w[sheet].iter_rows(min_row=c.row,max_row=c.row).__next__()):
+            # Keep untouched template rows empty, but coerce individual blank
+            # references to zero once a calculation has inputs (Excel semantics).
+            tokens = Tokenizer(c.value).items
+            refs = [key for t in tokens if t.subtype == 'RANGE'
+                    for key in self.reference(t.value, sheet)]
+            if refs and all(self.w[s][a].value in (None, '') for s, a in refs) and not any(t.type == 'FUNC' for t in tokens):
                 raise Missing()
             value = self.expression(c.value, sheet)
             if not isinstance(value, (str,Decimal)):
@@ -72,7 +77,7 @@ class Calculator:
         pos = 0
         def number(value):
             if value is None:
-                raise Missing()
+                return Decimal(0)
             if value is Pending:
                 raise Pending()
             if isinstance(value,list):
@@ -103,7 +108,7 @@ class Calculator:
                     flat=[x for a in args for x in (a if isinstance(a,list) else [a])]
                     if any(x is Pending for x in flat):raise Pending()
                     nums=[x for x in flat if isinstance(x,Decimal)]
-                    return sum(nums,Decimal(0)) if nums else None
+                    return sum(nums,Decimal(0))
                 if name=='ROUND' and len(args)==2:
                     digits=int(number(args[1]))
                     if abs(digits)>20:raise Pending()
@@ -131,6 +136,7 @@ class Calculator:
                 if t.type!='OPERATOR-INFIX' or powers.get(t.value,0)<level or t.value not in powers:break
                 pos+=1;right=expr(powers[t.value]+(0 if t.value=='^' else 1))
                 if t.value=='&':left=str(left)+str(right);continue
+                if t.value=='/' and right is None:raise Missing()
                 a=number(left);b=number(right)
                 if t.value=='+':left=a+b
                 elif t.value=='-':left=a-b
@@ -146,12 +152,13 @@ class Calculator:
         if value is None:raise Missing()
         return value
 
-    def results(self):
+    def results(self, selected=None):
         output={}
         for s in self.w:
             for row in s:
                 for c in row:
                     if c.data_type!='f':continue
+                    if selected is not None and (s.title,c.coordinate) not in selected:continue
                     v=self.cell(s.title,c.coordinate)
                     status='pending' if v is Pending else ('blank' if v is None else 'ready')
                     output[(s.title,c.coordinate)]={'status':status,'value':str(v) if status=='ready' else ''}
@@ -162,6 +169,7 @@ def display(value,number_format):
     if value in ('',None):return ''
     try:
         n=Decimal(str(value));fmt=number_format.split(';')[0]
+        if fmt == 'General':return format(n, '.15g')
         if '%' in fmt:n*=100
         match=re.search(r'[0#][0#,]*(?:\.([0#]+))?',fmt)
         if not match:return str(value)

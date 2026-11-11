@@ -12,7 +12,7 @@ const NeftSync = {
     host.querySelector('.neft-controls')?.remove();
     const choices = XL.books.filter(b => b.owner === p.book.owner && b.category === 'worksheet' && !b.master);
     const control = document.createElement('div'); control.className = 'neft-controls';
-    control.innerHTML = `<label>Sort NEFT by<select class="in" data-neft-column aria-label="Sort NEFT by">${[[0,'Original entry / upload order'],[1,'S.No (numeric)'],[2,'Name'],[3,'Designation']].map(([n,label])=>`<option value="${n}" ${state.column===n?'selected':''}>${label}</option>`).join('')}</select></label><label>Order<select class="in" data-neft-direction aria-label="NEFT sort direction"><option value="original" ${!state.column?'selected':''}>Original Order</option><option value="asc" ${state.column&&state.direction==='asc'?'selected':''}>Ascending (A–Z / smallest first)</option><option value="desc" ${state.column&&state.direction==='desc'?'selected':''}>Descending (Z–A / largest first)</option></select></label><label>Linked Worksheet<select class="in" data-neft-target aria-label="Linked Worksheet"><option value="new">New separate Worksheet</option>${choices.map(b=>`<option value="${b.id}" ${state.target===b.id?'selected':''}>${esc(b.name)}</option>`).join('')}</select></label><div class="actions"><button class="btn" type="button" data-neft-open ${state.target?'':'disabled'}>Open linked Worksheet</button><button class="btn" type="button" data-neft-retry>Retry sync</button></div><p class="neft-sync-status" role="status" aria-live="polite"></p><small class="muted neft-sync-note"></small>`;
+    control.innerHTML = `<label>Sort NEFT by<select class="in" data-neft-column aria-label="Sort NEFT by">${[[0,'Original entry / upload order'],[1,'S.No (numeric)'],[2,'Name'],[3,'Designation']].map(([n,label])=>`<option value="${n}" ${state.column===n?'selected':''}>${label}</option>`).join('')}</select></label><label>Order<select class="in" data-neft-direction aria-label="NEFT sort direction"><option value="original" ${!state.column?'selected':''}>Original Order</option><option value="asc" ${state.column&&state.direction==='asc'?'selected':''}>Ascending (A–Z / smallest first)</option><option value="desc" ${state.column&&state.direction==='desc'?'selected':''}>Descending (Z–A / largest first)</option></select></label><label>Linked Worksheet<select class="in" data-neft-target aria-label="Linked Worksheet"><option value="new">New separate Worksheet</option>${choices.map(b=>`<option value="${b.id}" ${state.target===b.id?'selected':''}>${esc(b.name)}</option>`).join('')}</select></label><div class="actions"><button class="btn" type="button" data-neft-open ${state.target?'':'disabled'}>Open linked Worksheet</button><button class="btn" type="button" data-neft-retry>Retry sync</button><button class="btn" type="button" data-neft-designations>Use Worksheet designations</button></div><p class="neft-sync-status" role="status" aria-live="polite"></p><small class="muted neft-sync-note"></small>`;
     host.querySelector('.xl-editor-bar').after(control);
     const col = control.querySelector('[data-neft-column]'), direction = control.querySelector('[data-neft-direction]');
     col.onchange = () => { if (col.value !== '0' && direction.value === 'original') direction.value = 'asc'; p.run(() => this.command(p, {action:'sort',column:Number(col.value),direction:col.value==='0'?'original':direction.value})); };
@@ -22,7 +22,8 @@ const NeftSync = {
       if (!confirm('Link this NEFT table to this Worksheet? Existing manual values and formulas are protected. The old linked file and all versions remain available.')) { e.target.value=state.target||'new'; return; }
       p.run(() => this.command(p,{action:'sync',target}));
     };
-    control.querySelector('[data-neft-retry]').onclick = () => p.run(() => this.command(p,{action:'sync'}));
+    control.querySelector('[data-neft-designations]').onclick = () => {if(confirm('Replace NEFT designations with unambiguous Worksheet matches? Unmatched manual values will be preserved.'))p.run(()=>this.command(p,{action:'designations'}));};
+    control.querySelector('[data-neft-retry]').onclick = () => p.run(() => this.command(p,{action:'retry'}));
     control.querySelector('[data-neft-open]').onclick = () => p.run(() => this.open(p));
     const labels = ['S.No','Name','Designation'];
     p.root.querySelectorAll('[data-sort]').forEach(button => {
@@ -35,7 +36,9 @@ const NeftSync = {
   },
   paint(p) {
     const state = p.grid?.neft; if (!state) return;
-    this.status(p,state.status==='synced'?'Worksheet Synced':state.status==='error'?'Worksheet sync failed: '+state.error:'Automatic sync starts when employee data is entered.',state.status==='error');
+    this.status(p,xlSyncText(state),state.status==='error');
+    const warnings=(state.designation_notes||[]).map(n=>`Row ${n.row}: ${n.status==='ambiguous'?'ambiguous employee designation':n.status==='blank'?'Worksheet designation is blank':'employee name not found in Worksheet'}`).join('; ');
+    if(warnings)this.status(p,xlSyncText(state)+'. '+warnings);
     const note = p.root.querySelector('.neft-sync-note');
     if (note) note.textContent = `${state.salary_note||'S.No, Name and Designation synchronize automatically.'} NEFT edits auto-save after a short pause. Original versions are retained.`;
   },
@@ -58,6 +61,11 @@ const NeftSync = {
     if (!p.alive()) return;
     if (state?.source_sheet && state.source_sheet !== p.sheet) state=(await p.request('/api/excel/metadata?id='+p.id)).neft_sheets?.[p.sheet];
     if (state) p.grid.neft=state;
+    for(const update of state?.designation_values||[]){
+      if(p.changes.has(p.sheet+'!'+update.address))continue;
+      for(const row of p.grid.rows){const cell=row.cells.find(c=>c.address===update.address);if(cell)cell.value=update.value;}
+      const input=p.root.querySelector(`[data-cell="${update.address}"]`);if(input)input.value=update.value;
+    }
     this.paint(p);
     await xlRefresh(); if (!p.alive() || !p.grid?.neft?.target) return;
     state=p.grid.neft;
@@ -130,7 +138,7 @@ ExcelSection.prototype.setCell=function(cell,value){
   }
 };
 ExcelSection.prototype.edited=function(){neftOriginal.edited.call(this);NeftSync.schedule(this);};
-ExcelSection.prototype.save=function(automatic=false){return NeftSync.enabled(this)?NeftSync.save(this,automatic):neftOriginal.save.call(this);};
+ExcelSection.prototype.save=function(automatic=false){return NeftSync.enabled(this)?NeftSync.save(this,automatic):neftOriginal.save.call(this,automatic);};
 ExcelSection.prototype.loadGrid=async function(){
   const previousTarget=this.grid?.neft?.target;
   await neftOriginal.loadGrid.call(this);
@@ -151,3 +159,24 @@ document.addEventListener('focusout',event=>{
 });
 
 ExcelSection.prototype.action=async function(action){await neftOriginal.action.call(this,action);if(action==='undo'||action==='redo')NeftSync.schedule(this);};
+
+function xlSyncText(state){
+ if(!state)return 'No employee records available';
+ if(state.status==='error')return (String(state.error).toLowerCase().includes('conflict')?'Mapping conflict - Review required: ':'Sync failed - Retry: ')+state.error;
+ if(state.status==='synced'&&Number(state.records)>0)return `Synced - ${state.records} employee records saved`;
+ if(state.status==='empty'||!Number(state.records))return 'No employee records available';
+ return 'Syncing...';
+}
+async function xlWorksheetSynced(panel,state){
+ if(!state||!panel.alive())return;
+ panel.message(xlSyncText(state),state.status==='error');
+ await xlRefresh();
+ const target=XL.panels.get('neft');
+ if(!state.neft||!target||state.status==='error')return;
+ if(target.dirty()){target.message('Worksheet changes are saved. Your NEFT draft is retained; save/reset it before loading the synchronized revision.',true);return;}
+ if(target.preview||target.id!==state.neft){target.resetDraft();target.id=state.neft;target.preview=false;target.sheet=state.sheet;target.grid=null;target.options();}
+ if(target.id===state.neft){
+  if(target.open)await target.run(()=>target.load());
+  else target.grid=null;
+ }
+}

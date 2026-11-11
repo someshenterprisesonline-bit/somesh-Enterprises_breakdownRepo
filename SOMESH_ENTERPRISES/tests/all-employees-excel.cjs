@@ -22,13 +22,13 @@ const names=['Nandha','Jagadeeshwari','Sudharsan','Rupashri'],categories=['neft'
    await p.locator('#xlDashboard').waitFor();await p.locator('#xlDashboard').click();
   }
   async function ready(p){await p.waitForFunction(()=>XL.libraryState==='ready'&&XL.templates.length===3);}
-  async function sectionReady(p,category){await p.waitForFunction(k=>XL.panels.get(k)?.state==='ready'&&!XL.panels.get(k)?.busy&&XL.panels.get(k).root.classList.contains('is-open'),category);}
+  async function sectionReady(p,category){await p.waitForFunction(k=>XL.panels.get(k)?.state==='ready'&&!XL.panels.get(k)?.busy&&XL.panels.get(k).root.classList.contains('is-open'),category).catch(async e=>{console.log('SECTION DEBUG',category,await p.evaluate(()=>[...XL.panels].map(([key,x])=>({key,state:x.state,open:x.open,busy:x.busy,message:x.root.querySelector('.xl-message').textContent,hover:x.root.matches(':hover'),rect:x.root.getBoundingClientRect().toJSON()}))));throw e;});}
   const created={};
   for(const name of names){
    const ctx=await context(),p=await ctx.newPage();await p.goto(base);await signIn(p,name);await ready(p);
    assert.equal(await p.evaluate(()=>XL.books.length),0);
    assert.deepEqual(await p.evaluate(()=>Object.fromEntries(XL.templates.map(t=>[t.category,t.id]))),info.masters);
-   assert.deepEqual(await p.locator('.xl-title h2').allTextContents(),['NEFT SHEET','WORKSHEET','COVERING LETTER']);
+   assert.deepEqual(await p.locator('.xl-title h2').allTextContents(),['WORKSHEET','NEFT SHEET','COVERING LETTER']);
    created[name]={};
    for(const category of categories){
     const root=p.locator(`[data-section="${category}"]`);await root.locator('.xl-title').hover();await sectionReady(p,category);

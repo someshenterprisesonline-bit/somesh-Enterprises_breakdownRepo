@@ -22,7 +22,7 @@ function logout(expired) {
   $("#employeeEditor")?.close(); S.manageEmployees = false; S.employeeSearch = ""; S.billDraft = null; S.billOpenStatus = null; S.openingBills = false;
   closeAdminManagement(); S.adminManagement = null; S.trTableHover = false; S.trTablePinned = false; S.loginGroup = null; S.uq = "";
   S.user = null; S.token = null; S.state = null; S.pipe = null; store.set("se_user", ""); store.set("se_token", ""); if (S.es) S.es.close(); closeSheet(); render();
-  api("/api/meta").then(meta => { S.meta = meta; if (!S.user) render(); }).catch(() => {});
+  api("/api/meta").then(meta => {validateProfileMeta(meta);const changed=JSON.stringify(meta.users)!==JSON.stringify(S.meta.users);S.meta=meta;S.profileError=null;if(!S.user&&changed)render();}).catch(e=>{if(!S.user){S.profileError=e.message;render();}});
 }
 async function finishSignIn(r) {
   S.token = r.token; S.user = r.user; store.set("se_token", r.token); store.set("se_user", r.user); S.tab = r.admin ? "dash" : "mine"; connect(); await load(); askNotify();

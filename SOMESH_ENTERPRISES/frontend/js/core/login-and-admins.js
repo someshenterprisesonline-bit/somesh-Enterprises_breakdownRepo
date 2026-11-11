@@ -60,7 +60,13 @@ function loginGroupOpen(group) {
 function loginIcon(admin) {
   return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${admin ? '<path d="M12 3l8 3v5c0 5-8 10-8 10S4 16 4 11V6l8-3z"/><path d="M8 12l3 3 5-6"/>' : '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0112 0v3M17 5a3 3 0 010 6M18 15a5 5 0 013 4v2"/>'}</svg>`;
 }
+function runtimeNotice(){
+ const environment=S.meta?.runtime?.environment;
+ return environment&&environment!=='production'?'<p class="panel runtime-notice" role="status">Development/test instance - synthetic profiles and data. This is not the office user store.</p>':'';
+}
 function loginMarkup() {
+  if(S.profileError)return `<div class="login"><h1>${APP}</h1><p role="alert">Unable to load the authoritative user profiles. Check the server connection and configuration. No replacement profiles are displayed.</p></div>`;
+
   const matches = loginProfiles(), searching = !!(S.uq || "").trim();
   const group = (id, title, icon) => {
     const users = matches.filter(u => id === "admins" ? u.admin : !u.admin), open = loginGroupOpen(id);
@@ -69,7 +75,7 @@ function loginMarkup() {
     const list = id === "admins" ? `<div class="people">${users.map(loginPerson).join("")}</div>` : departments.map(d => `<h3 class="dept">${esc(d)}</h3><div class="people">${users.filter(u => (u.dept || "Other") === d).map(loginPerson).join("")}</div>`).join("");
     return `<section class="login-group ${open ? "is-open" : ""}" data-login-group="${id}"><button class="login-group-toggle" type="button" data-login-toggle="${id}" aria-expanded="${open}" aria-controls="login-${id}"><span class="login-group-icon" aria-hidden="true">${icon}</span><b>${title}</b><span class="login-count">${searching ? `${users.length} / ` : ""}${total}</span><span class="login-chevron" aria-hidden="true">&#9662;</span></button><div class="login-group-body" id="login-${id}" ${open ? "" : "inert"}><div><div class="login-group-content">${list || `<p class="muted small">No matching profiles.</p>`}</div></div></div></section>`;
   };
-  return `<div class="login login-new ${S.introStarted && !S.introDone ? "intro-login" : ""}"><div class="login-theme-bar">${Theme.button()}</div><div class="logo mark">S</div><h1>${APP}</h1><div class="ver">${APP_VERSION}</div><input class="search" id="uq" placeholder="Type your name" value="${esc(S.uq || "")}" aria-label="Find your name" autocomplete="off"><div class="login-groups">${group("admins", "ADMIN", loginIcon(true))}${group("employees", "EMPLOYEES", loginIcon(false))}</div>${searching && !matches.length ? `<p class="muted" role="status">No matching users.</p>` : ""}</div>`;
+  return `<div class="login login-new ${S.introStarted && !S.introDone ? "intro-login" : ""}"><div class="login-theme-bar">${Theme.button()}</div><div class="logo mark">S</div><h1>${APP}</h1><div class="ver">${APP_VERSION}</div><input class="search" id="uq" placeholder="Type your name" value="${esc(S.uq || "")}" aria-label="Find your name" autocomplete="off">${runtimeNotice()}<div class="login-groups">${group("admins", "ADMIN", loginIcon(true))}${group("employees", "EMPLOYEES", loginIcon(false))}</div>${searching && !matches.length ? `<p class="muted" role="status">No matching users.</p>` : ""}</div>`;
 }
 function syncLoginGroups() {
   document.querySelectorAll("[data-login-group]").forEach(group => {

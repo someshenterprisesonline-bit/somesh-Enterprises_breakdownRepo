@@ -1,0 +1,46 @@
+name: Release validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: SOMESH_ENTERPRISES
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: SOMESH_ENTERPRISES/requirements-dev.txt
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Python backend and API regressions (isolated data)
+        run: python -m unittest discover -s tests -v
+      - name: Python syntax
+        run: python -m compileall -q backend tests tools
+      - name: Frontend JavaScript syntax (no compiled frontend)
+        shell: python
+        run: |
+          import pathlib, subprocess
+          files = list(pathlib.Path('frontend/js').rglob('*.js'))
+          for file in files:
+              subprocess.run(['node', '--check', str(file)], check=True)
+          print(f'{len(files)} frontend JavaScript files passed syntax checks.')

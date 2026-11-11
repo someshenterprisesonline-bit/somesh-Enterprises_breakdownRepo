@@ -29,7 +29,10 @@ def counts(con):
 
 def backup(root=ROOT, label='manual', keep=0, dest=None):
     root = Path(root)
-    src_path = root / DB
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'backend'))
+    from runtime_storage import database_path
+    config=json.loads((root/'backend/config.json').read_text(encoding='utf-8'))
+    src_path = database_path(root,config)
     if not src_path.is_file():
         raise FileNotFoundError(f'No database at {src_path}')
     base = Path(dest) if dest else root / 'data' / 'backups'

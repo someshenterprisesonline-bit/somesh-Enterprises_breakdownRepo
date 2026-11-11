@@ -14,9 +14,9 @@ const base=process.env.TEST_BASE_URL,info=JSON.parse(process.env.TEST_FIXTURE_IN
    await p.goto(base);await p.locator('#xlDashboard').click();await p.waitForFunction(()=>XL.templates.length===3);return {ctx,p};
   }
   const {ctx,p}=await create('Rupashri',info.employees.Rupashri.token),neft=p.locator('[data-section="neft"]'),work=p.locator('[data-section="worksheet"]'),letter=p.locator('[data-section="letter"]');
-  assert.deepEqual(await p.locator('.xl-title h2').allTextContents(),['NEFT SHEET','WORKSHEET','COVERING LETTER']);
+  assert.deepEqual(await p.locator('.xl-title h2').allTextContents(),['WORKSHEET','NEFT SHEET','COVERING LETTER']);
   const before=await p.evaluate(()=>XL.books.length);
-  await neft.locator('.xl-title').hover();await neft.locator('.xl-grid').waitFor();assert.ok(await neft.evaluate(el=>el.classList.contains('is-open')));
+  await neft.locator('.xl-title').hover();await neft.locator('.xl-grid').waitFor().catch(async e=>{console.log(await p.evaluate(()=>[...XL.panels].map(([key,p])=>({key,state:p.state,open:p.open,preview:p.preview,id:p.id,message:p.root.querySelector('.xl-message').textContent}))));throw e;});assert.ok(await neft.evaluate(el=>el.classList.contains('is-open')));
   assert.ok((await neft.locator('[data-cell]').evaluateAll(es=>es.map(e=>e.value))).every(v=>v===''));
   await neft.locator('.xl-grid thead').hover();await p.waitForFunction(()=>document.querySelector('[data-section="neft"]').classList.contains('xl-large'));
   await neft.locator('.xl-grid tbody input').first().hover();assert.ok(await neft.evaluate(el=>el.classList.contains('is-open')));

@@ -284,3 +284,46 @@ Stable row UUIDs keep payroll fields associated with employees through edits and
 The open linked Worksheet refreshes without reloading the page. Use **Open linked Worksheet** when a different document is already open. Status shows **Worksheet Synced** or a retryable error. The existing BAT launcher runs these source changes directly; restart it after backend updates. This application uses its existing plain JavaScript/Python HTTP service and SQLite storage, with no React build, FastAPI service or separate temporary production store.
 
 Run `python tests/run_browser.py --neft` with Playwright/Chrome configured as above; repeat with `$env:TEST_THEME='dark'`. These checks use disposable synthetic databases and verify manual entry, all sorts, unsaved payroll preservation, edits/undo, row addition/deletion, refresh/reopen, 100-row uploads, separate employee documents and both Excel downloads. Screenshots remain under ignored `data/neft-sync-audit/`. Backend/API tests are included in the normal unittest discovery command.
+
+
+## Excel Workspace order, designations and first employee row
+
+Workspace sections appear as WORKSHEET, NEFT SHEET and COVERING LETTER for every authorized profile. This does not reorder workbook tabs.
+
+NEFT names look up designations in the owner's Worksheets, preferring a matching linked Worksheet. Matching ignores case and repeated/outer whitespace. Unknown names, blank source roles and conflicting duplicates produce non-blocking status messages. Generated roles track stable employee UUIDs, follow source changes and clear when names are removed. Manual roles are preserved; **Use Worksheet designations** explicitly replaces them only for unambiguous matches. Generated mirrors are excluded as independent lookup evidence to prevent circular updates.
+
+The reference TNOU row 7 is an empty spacer; its first employee is row 8. New blank templates compact leading employee-table spacers, translating all original formulas and totals so the first employee is at row 7. Original first-employee J/L cells remain manual, with blank values treated as zero in contribution sums. Legacy manual documents receive a first-row formula/type repair without moving existing employees; saving persists it and current exports include it. Completed uploads and historical version bytes are excluded from template repairs.
+
+For a separate local development database and synthetic employee data, run:
+
+```powershell
+python tools/start_workspace_dev.py --port 8081
+```
+
+This uses the existing launcher from an isolated source/runtime copy under ignored `data/workspace-dev`, backs up that development database and opens Chrome at http://localhost:8081. Select the synthetic **Nandha** profile. The office server/database are untouched. Repeat startup reuses the healthy development server; stop only that development process before restarting to load backend changes. `--no-browser` suppresses opening Chrome and `--prepare` prepares files without starting the server.
+
+Verification: `python -m unittest discover -s tests -v`, `python tests/run_browser.py --improvements`, `--excel`, `--neft` and `--all-employees`. Set PLAYWRIGHT_MODULE_PATH if Playwright is installed outside Node's module path. See `docs/WORKSPACE_IMPROVEMENTS_REPORT.md` for executed checks and evidence. This frontend has no production compilation step; JavaScript syntax and browser behavior are verified directly.
+
+
+## Critical sync and profile-store safeguards
+
+Worksheet autosaves now synchronize the linked NEFT employee rows as well as designations. TNOU maps A/B/C and **Take Home Salary (N)** to NEFT S.No/Name/Designation/Salary Amount (H). Basis Salary and gross Net Salary are not paid into NEFT. A reverse-generated take-home value is excluded from the legacy NEFT-to-Worksheet gross salary mapping, including after sorting. Missing pay inputs preserve an existing amount; invalid calculations and conflicting independent edits report a retryable mapping error. Banking fields, remarks, formulas and historical upload bytes remain intact.
+
+Status includes the number of saved employees. Empty data reports No employee records available. **Retry NEFT sync** on Worksheet retries Worksheet-to-NEFT; NEFT's **Retry sync** retries the failed direction. Stable UUIDs keep employee bank details associated through edits, sorting and deletions; a removed employee's banking information remains in its versioned row and is not allocated to a replacement employee.
+
+The existing office is **http://localhost:8080**, using `data/monthly_cycle.db`. The isolated helper uses **http://localhost:8081**, `data/workspace-dev/data/monthly_cycle.db` and explicitly labels its synthetic profiles. The office has its own authoritative roster; development profiles are not substitutes for office accounts. No automatic merging or database recovery occurs.
+
+An established SQLite `employees` table is authoritative. Startup never imports replacement/default users from a stale JSON file into that store. Missing, empty or admin-less stores fail visibly for review. Eligible active profiles retain names, roles, departments and identifiers; archived accounts remain archived. Existing `users.json` continues as the synchronized mirror and initial legacy bootstrap input.
+
+Optional `data_dir` in `backend/config.json` resolves from the project root, independently of the shell's working directory; the database filename remains `monthly_cycle.db`. The backend, launcher and backup tool use the same resolver. Startup logs the absolute database path and environment; health checks verify a storage identifier without disclosing credentials. Existing installations retain their settings.
+
+A **new production installation** now requires explicit initialization after configuring its private PIN and real user profiles:
+
+```powershell
+python backend/launcher.py --initialize
+# or pass --initialize to START SOMESH ENTERPRISES.bat
+```
+
+For an existing installation with a missing database or configuration, review paths and verified backups instead of initializing an empty replacement. A healthy existing instance is reused only when its configured storage identity matches.
+
+See `docs/CRITICAL_SYNC_PROFILE_REPORT.md` for root causes, verified backup/preservation findings, mappings and executed tests.

@@ -17,6 +17,8 @@ def add_employees(app):
     for name, dept in EMPLOYEES:
         app.g['USERS'].append({'name': name, 'dept': dept, 'role': 'Employee'})
         app.g['USER_NAMES'].add(name)
+        app.g['DB'].execute('INSERT OR IGNORE INTO employees VALUES (?,?,NULL)',(name.casefold(),json.dumps(app.g['USERS'][-1])))
+    app.g['DB'].commit()
 
 
 def sample(rows=3):

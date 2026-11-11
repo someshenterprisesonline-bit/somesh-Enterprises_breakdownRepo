@@ -186,7 +186,8 @@ def commit(g, b, actor, data, changes):
         result = write_version(g, current, actor, data, changes)
         current['revision'] = result['revision']
         status = NS.after_commit(g, actor, current, data, changes)
-        if status is not None: result['neft_sync'] = status
+        if status is not None: result['worksheet_sync' if category(current)=='worksheet' else 'neft_sync'] = status
+        result['revision'] = g['DB'].execute('SELECT revision FROM ew_books WHERE id=?',(b['id'],)).fetchone()[0]
         g['DB'].commit()
         return result
     except Exception:
@@ -236,8 +237,57 @@ def source_book(g,b):
     return b
 
 
+def leading_employee_spacers(s):
+    if not NS.columns(s):return []
+    row=layout(s)['header_end']+1;spacers=[]
+    while row<=s.max_row and all(c.value is None for c in s[row]):
+        spacers.append(row);row+=1
+    return spacers if row<=s.max_row and any(c.data_type=='f' for c in s[row]) else []
+
+
+def repair_manual_start(g,b,w,schema=None):
+    """Repair legacy manual drafts that exposed a reference spacer as an employee.
+
+    Completed uploads are excluded. Existing formulas elsewhere remain intact.
+    """
+    if b.get('origin')!='blank' or not b.get('source'):return
+    source=read(data_for(g,source_book(g,b)),g)
+    for s in w:
+        if s.title not in source.sheetnames:continue
+        ref=source[s.title];spacers=leading_employee_spacers(ref)
+        if not spacers:continue
+        first=layout(s)['header_end']+1;pattern=spacers[-1]+1
+        if schema is not None:
+            types=schema.setdefault(s.title,{})
+            for c in ref[pattern]:
+                if c.data_type!='f':types[s.cell(first,c.column).coordinate]='date' if c.is_date else c.data_type
+        if all(s.cell(first,c.column).data_type=='f' for c in ref[pattern] if c.data_type=='f'):continue
+        for c in ref[pattern]:
+            if c.data_type=='f':
+                dest=s.cell(first,c.column)
+                if dest.data_type=='f':continue
+                dest.value=Translator(c.value,origin=c.coordinate).translate_formula(dest.coordinate)
+                dest._style=copy.copy(c._style)
+        # Original summaries started after the spacer; include the repaired row.
+        for ws in w:
+            for row in ws:
+                for c in row:
+                    if c.data_type!='f':continue
+                    tokens=Tokenizer(c.value)
+                    for token in tokens.items:
+                        if token.subtype!='RANGE':continue
+                        prefix,sep,address=token.value.rpartition('!')
+                        if (prefix.strip("'") if sep else ws.title)!=s.title:continue
+                        match=re.fullmatch(r'(\$?[A-Z]+\$?)'+str(pattern)+r'(:\$?[A-Z]+\$?[0-9]+)',address if sep else token.value)
+                        if match:token.value=(prefix+'!' if sep else '')+match[1]+str(first)+match[2]
+                    c.value='='+''.join(t.value for t in tokens.items)
+
+
 def blank_workbook(data,g):
     w=read(data,g);schema={}
+    for s in w:
+        spacers=leading_employee_spacers(s)
+        for row in reversed(spacers):change_row(g,w,s,{'action':'delete','row':row},{'origin':'blank','formulas_unlocked':False},True)
     for s in w:
         info=layout(s);types={};identifiers=set()
         for row in info['header_rows']:
@@ -288,6 +338,7 @@ def cell_json(c, b, admin, headers):
     return {'address': c.coordinate, 'value': v.isoformat() if isinstance(v, (datetime, date, time)) else (str(v) if v is not None else ''),
             'type': 'date' if isinstance(v, (datetime, date, time)) else c.data_type,
             'format': c.number_format, 'formula': c.data_type == 'f',
+            'formula_expression': c.value if admin and c.data_type == 'f' else None,
             'editable': not b['locked'] and (admin or b['can_edit']) and not isinstance(c, MergedCell) and c.row > headers and (c.data_type != 'f' or bool(admin and b['formulas_unlocked']))}
 
 
@@ -309,6 +360,9 @@ def _get(g, actor, path, qs):
         if path.endswith('/download'):
             extension=b.get('format') or 'xlsx'
             download_data = data_for(g, b, int(arg('version', '0')) or None)
+            if b.get('origin')=='blank' and extension=='xlsx' and not int(arg('version','0')):
+                manual=read(download_data,g);repair_manual_start(g,b,manual)
+                download_data=NS.serialize(manual,download_data,calculations=CALC.Calculator(manual).results())
             if category(b) == 'neft' and not b['master'] and not int(arg('version', '0')):
                 download_data = NS.export(g, b, download_data)
             return (download_data, filename(arg('filename',b['name']),extension), 'application/vnd.openxmlformats-officedocument.'+('wordprocessingml.document' if extension=='docx' else 'spreadsheetml.sheet'))
@@ -320,8 +374,9 @@ def _get(g, actor, path, qs):
             if path.endswith(('/document','/metadata')):return {'book':public(b),'document':WORD.preview(data),'template':template}
             fail(g,'Choose the document editor for Word files.')
         w = read(data, g)
+        repair_manual_start(g,b,w,schema)
         if path.endswith('/metadata'):
-            return {'employee_rows': [dict(r) for r in g['DB'].execute('SELECT m.source_id AS row_id,m.position,l.target_sheet AS sheet FROM ew_neft_members m JOIN ew_neft_links l ON l.book=m.book AND l.sheet=m.sheet WHERE l.target=?', (b['id'],))], 'book': public(b), 'sheets': metadata(w), 'neft_sheets': {s.title: NS.describe(g, b, s) for s in w if NS.describe(g, b, s)}}
+            return {'employee_rows': [dict(r) for r in g['DB'].execute('SELECT m.source_id AS row_id,m.position,l.target_sheet AS sheet FROM ew_neft_members m JOIN ew_neft_links l ON l.book=m.book AND l.sheet=m.sheet WHERE l.target=?', (b['id'],))], 'book': public(b), 'worksheet_sync':NS.REVERSE.describe(g,b['id']), 'sheets': metadata(w), 'neft_sheets': {s.title: NS.describe(g, b, s) for s in w if NS.describe(g, b, s)}}
         if path.endswith('/sheet'):
             name = arg('sheet', w.sheetnames[0])
             if name not in w.sheetnames:
@@ -346,7 +401,7 @@ def _get(g, actor, path, qs):
                     v = s.cell(r, sc).value
                     return (0, v) if isinstance(v, (int, float)) else (1, str(v or '').casefold())
                 indices.sort(key=key, reverse=arg('direction') == 'desc')
-            result={'book': public(b), 'sheet':s.title, **info, 'columns': s.max_column, 'total': len(indices), 'offset': offset,
+            result={'book': public(b), 'worksheet_sync':NS.REVERSE.describe(g,b['id']), 'sheet':s.title, **info, 'columns': s.max_column, 'total': len(indices), 'offset': offset,
                     'rows': [{'number': r, 'cells': [cell_json(c, b, g['is_admin'](actor), info['header_end']) for c in s[r]]} for r in indices[offset:offset + limit]]}
             result['neft'] = neft
             registry = {r['position']: r['id'] for r in g['DB'].execute('SELECT id,position FROM ew_neft_rows WHERE book=? AND sheet=? AND active=1', (b['id'], s.title))}
@@ -529,6 +584,11 @@ def _post(g, actor, path, body):
             if path.endswith('/neft'):
                 b = book(g, actor, body.get('id'), 'edit'); check_revision(g, b, body)
                 return NS.command(g, actor, b, body)
+            if path.endswith('/worksheet-sync'):
+                b=book(g,actor,body.get('id'),'edit');check_revision(g,b,body)
+                if category(b)!='worksheet' or b['master']:fail(g,'Choose a private Worksheet.')
+                state=NS.REVERSE.attempt(g,actor,b,data_for(g,b),{'retry':True});db.commit()
+                return {'ok':True,'id':b['id'],'revision':b['revision'],'worksheet_sync':state}
             if path.endswith('/blank'):
                 source=template_book(g,actor,body.get('id'),'edit')
                 if not admin and not source['can_edit']:raise g['Denied']('This template is view-only.')
@@ -638,9 +698,8 @@ def _post(g, actor, path, body):
             if path.endswith(('/save','/calculate')):
                 if b.get('format')=='docx':fail(g,'Choose the Word editor.')
                 original_data=data_for(g,b)
-                w = read(original_data, g); changes = body.get('changes', []); operations = body.get('rows', [])
+                w = read(original_data, g); schema=json.loads(b.get('schema_json') or '{}'); repair_manual_start(g,b,w,schema); changes = body.get('changes', []); operations = body.get('rows', [])
                 layouts={s.title:layout(s) for s in w}
-                schema=json.loads(b.get('schema_json') or '{}')
                 if not isinstance(changes, list) or len(changes) > 10000 or not isinstance(operations, list) or len(operations) > 100:
                     fail(g, 'Save at most 10,000 cell edits and 100 row changes at once.')
                 for change in changes:
@@ -680,12 +739,11 @@ def _post(g, actor, path, body):
                         for col in range(1,w[op['sheet']].max_column+1):
                             letter=get_column_letter(col);shifted[letter+str(at)]=types.get(letter+str(max(layouts[op['sheet']]['header_end']+1,at-1)),'text')
                     schema[op['sheet']]=shifted
-                results=CALC.Calculator(w).results()
-                changed=CALC.affected(w,changes) if not operations else set(results)
-                results={k:v for k,v in results.items() if k in changed}
+                changed=CALC.affected(w,changes) if not operations else None
+                results=CALC.Calculator(w).results(changed)
                 if path.endswith('/calculate'):
                     return {'revision':b['revision'],'calculations':[{'sheet':s,'address':a,**v,'display':CALC.display(v['value'],w[s][a].number_format)} for (s,a),v in results.items()]}
-                if operations:db.execute('UPDATE ew_books SET schema_json=? WHERE id=?',(json.dumps(schema),b['id']))
+                db.execute('UPDATE ew_books SET schema_json=? WHERE id=?',(json.dumps(schema),b['id']))
                 w.calculation = CalcProperties(calcId=0, fullCalcOnLoad=True)
                 out = io.BytesIO(); w.save(out)
                 data=CALC.write_caches(out.getvalue(),results,CALC.cached(openpyxl.load_workbook(io.BytesIO(original_data),data_only=True)))

@@ -115,8 +115,9 @@ class NeftSyncTests(unittest.TestCase):
         row=next(r for r in self.book(target)['Worksheet'].iter_rows(min_row=2) if r[1].value=='New employee')
         self.assertEqual(self.save(target,[dict(sheet='Worksheet',address=row[1].coordinate,value='Manual override',type='text')])[0],200)
         before=self.app.g['q']('SELECT * FROM ew_versions WHERE book=?',(target,))
-        status,result=self.save(bid,[dict(sheet='NEFT',address='C2',value='Supervisor',type='text')]);self.assertEqual(status,200,result);self.assertEqual(result['neft_sync']['status'],'error');self.assertIn('manual value',result['neft_sync']['error'])
-        self.assertEqual(self.app.g['q']('SELECT * FROM ew_versions WHERE book=?',(target,)),before)
+        status,result=self.save(bid,[dict(sheet='NEFT',address='C2',value='Supervisor',type='text')]);self.assertEqual(status,200,result);self.assertEqual(result['neft_sync']['status'],'synced')
+        self.assertIn('Manual override',[r[1].value for r in self.book(bid)['NEFT'].iter_rows(min_row=2)])
+        self.assertNotEqual(self.app.g['q']('SELECT * FROM ew_versions WHERE book=?',(target,)),before)
 
     def test_calculated_net_salary_is_never_overwritten(self):
         self.master_work=self.upload(worksheet_file(salary_formula=True),'worksheet',master=True)

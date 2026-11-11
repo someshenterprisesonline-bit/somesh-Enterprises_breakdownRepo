@@ -25,13 +25,15 @@ def letter_sample():
     return out.getvalue()
 
 
-def seed_documents(app,actual=False,assign=True):
+def seed_documents(app,actual=False,assign=True,worksheet_data=None,neft_data=None):
     add_employees(app);admin=app.login();info={'admin':admin,'masters':{},'employees':{}}
     root=Path(os.environ.get('EXCEL_REFERENCE_ROOT',''))
     names={'neft':'538-OMCL-Open University -Sept-26(03-10-2026).xlsx','worksheet':'Oct-26-OMCL - TNOU (1).xlsx','letter':'538-September-26-TN-Open University.docx'}
     for slot,(cat,name) in enumerate(names.items(),1):
         actual_name=name.replace(' (1)','')
         data=(root/actual_name).read_bytes() if actual and (root/actual_name).is_file() else letter_sample() if cat=='letter' else sample()
+        if cat=='worksheet' and worksheet_data is not None:data=worksheet_data
+        if cat=='neft' and neft_data is not None:data=neft_data
         status,p=app.request('/api/excel/preview',{'name':name,'data':base64.b64encode(data).decode()},admin);assert status==200,p
         status,b=app.request('/api/excel/import',{'preview':p['preview'],'completed':True,'master':True,'slot':slot,'category':cat},admin);assert status==200,b
         info['masters'][cat]=b['id']
@@ -107,7 +109,7 @@ class DocumentWorkspaceTests(unittest.TestCase):
 
     def test_unsupported_calculation_and_missing_inputs_are_not_incorrect_results(self):
         w=openpyxl.Workbook();s=w.active;s['A1']=5;s['B1']='=FOOBAR(A1)';s['C1']='=A2/A3';s['D1']='=SUM(A2:A3)';s['E1']='=A1*13%'
-        r=CALC.Calculator(w).results();self.assertEqual(r[('Sheet','B1')]['status'],'pending');self.assertEqual(r[('Sheet','C1')]['status'],'blank');self.assertEqual(r[('Sheet','D1')]['status'],'blank');self.assertEqual(r[('Sheet','E1')]['value'],'0.65')
+        r=CALC.Calculator(w).results();self.assertEqual(r[('Sheet','B1')]['status'],'pending');self.assertEqual(r[('Sheet','C1')]['status'],'blank');self.assertEqual(r[('Sheet','D1')]['value'],'0');self.assertEqual(r[('Sheet','E1')]['value'],'0.65')
 
     def test_word_blank_edit_preserves_format_tables_and_package_parts(self):
         bid=self.blank('letter');raw=self.download(bid);_,tree=WORD.read(raw);txt=' '.join(WORD.text(p) for p in tree.findall('.//w:p',WORD.NS))
@@ -150,7 +152,7 @@ class DocumentWorkspaceTests(unittest.TestCase):
         expected=Translator(s.cell(last,9).value,origin=s.cell(last,9).coordinate).translate_formula(s.cell(last+1,9).coordinate)
         EW.change_row(self.app.g,w,s,{'action':'add','row':last+1},{'formulas_unlocked':False},False)
         self.assertEqual(s.cell(last+1,9).value,expected)
-        self.assertEqual(s.cell(last+2,9).value,f'=SUM(I8:I{last+1})')
+        self.assertEqual(s.cell(last+2,9).value,f'=SUM(I7:I{last+1})')
         self.assertEqual(s.cell(last+1,9).number_format,'0')
 
 

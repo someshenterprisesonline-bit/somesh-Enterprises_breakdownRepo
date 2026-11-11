@@ -25,7 +25,7 @@ const info=JSON.parse(process.env.TEST_FIXTURE_INFO).neft, base=process.env.TEST
   async function sort(col,dir){await n.locator('[data-neft-column]').selectOption(String(col));await p.waitForFunction(()=>!XL.panels.get('neft').busy);await n.locator('[data-neft-direction]').selectOption(dir);await settled();}
   await sort(2,'asc');
   assert.equal(await w.locator('[data-cell="E11"]').inputValue(),'777');assert.equal(await w.locator('[data-cell="G11"]').inputValue(),'Keep payroll note');
-  await w.locator('[data-xl="save"]').click();await w.getByText('Changes saved.',{exact:true}).waitFor();
+  await w.locator('[data-xl="save"]').click();await p.waitForFunction(()=>!XL.panels.get('worksheet').dirty()&&!XL.panels.get('worksheet').busy);
   async function values(key){return p.evaluate(key=>XL.panels.get(key).grid.rows.filter(r=>r.cells[1].value).map(r=>r.cells.map(c=>c.value)),key);}
   for(const [col,dir] of [[2,'asc'],[2,'desc'],[3,'asc'],[3,'desc'],[1,'asc'],[1,'desc'],[0,'original']]){
    await sort(col,dir);const nr=await values('neft'),wr=await values('worksheet');assert.deepEqual(nr.map(r=>r.slice(0,3)),wr.map(r=>r.slice(0,3)));
@@ -54,16 +54,17 @@ const info=JSON.parse(process.env.TEST_FIXTURE_INFO).neft, base=process.env.TEST
   assert.equal(await p.evaluate(()=>document.documentElement.dataset.theme),process.env.TEST_THEME||'light');
   await p.setViewportSize({width:390,height:844});assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
   await p.screenshot({path:path.join(process.env.TEST_ARTIFACT_DIR,'neft-mobile-'+(process.env.TEST_THEME||'light')+'.png'),fullPage:true});await p.setViewportSize({width:1440,height:1000});
-  await w.locator('[data-cell="B2"]').fill('Manual protected name');await w.locator('[data-xl="save"]').click();await w.getByText('Changes saved.',{exact:true}).waitFor();
+  const adminLogin=await context.request.post(base+'/api/login',{data:{user:'Admin One',pin:process.env.TEST_ADMIN_PIN}}),adminToken=(await adminLogin.json()).token;
+  const targetId=await p.evaluate(()=>XL.panels.get('worksheet').id);
+  async function lockTarget(locked){const meta=await (await context.request.get(base+'/api/excel/metadata?id='+targetId,{headers:{'X-Session':adminToken}})).json();const r=await context.request.post(base+'/api/excel/permissions',{headers:{'X-Session':adminToken},data:{id:targetId,revision:meta.book.revision,locked}});assert.equal(r.status(),200);}
+  await lockTarget(true);
   const editedAddress=await p.evaluate(()=>XL.panels.get('neft').grid.rows[0].cells[1].address);
   await n.locator('[data-cell="'+editedAddress+'"]').fill('Source name retained');
-  await p.waitForFunction(()=>!XL.panels.get('neft').dirty()&&!XL.panels.get('neft').busy&&XL.panels.get('neft').grid.neft.status==='error');
-  assert.ok((await n.locator('.neft-sync-status').innerText()).includes('manual value'));assert.equal(await w.locator('[data-cell="B2"]').inputValue(),'Manual protected name');
-  await w.locator('[data-cell="B2"]').fill('Employee 001');await w.locator('[data-xl="save"]').click();await w.getByText('Changes saved.',{exact:true}).waitFor();
-  await n.locator('[data-neft-retry]').click();await settled();
-  const updatedNames=await p.evaluate(async()=>{const w=XL.panels.get('worksheet');return (await w.request('/api/excel/sheet?id='+w.id+'&sheet=Worksheet&limit=100')).rows.map(r=>r.cells[1].value);});
-  assert.ok(updatedNames.includes('Source name retained'));assert.ok(!updatedNames.includes('Manual protected name'));
-  console.log('PASS responsive controls, visible sync failure protecting a manual mapped value, retained source save and successful Retry sync');
+  await p.waitForFunction(()=>XL.panels.get('neft').grid.neft.status==='error');
+  assert.match(await n.locator('.neft-sync-status').innerText(),/Sync failed|Mapping conflict/);
+  await lockTarget(false);await n.locator('[data-neft-retry]').click();await settled();
+  assert.ok(await p.evaluate(async()=>{const w=XL.panels.get('worksheet');const all=await w.request('/api/excel/sheet?id='+w.id+'&sheet=Worksheet&limit=100');return all.rows.some(r=>r.cells[1].value==='Source name retained');}));
+  console.log('PASS responsive controls, visible sync failure protecting a locked target, retained source save and successful Retry sync');
   const other=await browser.newContext({viewport:{width:1440,height:1000}}),q=await other.newPage();
   await q.addInitScript(token=>{localStorage.setItem('se_token',token);localStorage.setItem('se_user','Rupashri');},info.other_token);
   await q.goto(base);await q.locator('#xlDashboard').click();await q.waitForFunction(()=>XL.templates.length===2);

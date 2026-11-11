@@ -10,11 +10,20 @@ def key(name):
 
 def initialize(g):
     db = g['DB']
+    existed=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='employees'").fetchone()
+    if existed and not db.execute('SELECT 1 FROM employees LIMIT 1').fetchone():raise ValueError('The existing profile store is empty; no default accounts were inserted.')
     db.execute('CREATE TABLE IF NOT EXISTS employees (name_key TEXT PRIMARY KEY, profile TEXT NOT NULL, deleted_at TEXT)')
-    for user in g['USERS']:
-        db.execute('INSERT OR IGNORE INTO employees VALUES (?,?,NULL)', (key(user['name']), json.dumps(user)))
+    # JSON is a first-install/legacy seed only. Existing SQLite identities are
+    # authoritative; a default/stale JSON file must never add replacement users.
+    if not db.execute('SELECT 1 FROM employees LIMIT 1').fetchone():
+        from runtime_storage import validate_profiles
+        validate_profiles(g['USERS'])
+        for user in g['USERS']:
+            db.execute('INSERT OR IGNORE INTO employees VALUES (?,?,NULL)', (key(user['name']), json.dumps(user)))
     db.commit()
     refresh(g)
+    from runtime_storage import validate_profiles
+    validate_profiles(g['USERS'])
 
 
 def refresh(g):

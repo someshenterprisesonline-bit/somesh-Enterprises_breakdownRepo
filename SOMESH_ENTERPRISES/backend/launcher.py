@@ -30,6 +30,12 @@ def healthy(url, root=ROOT):
     try:
         with urllib.request.urlopen(url + '/api/health', timeout=2) as response:
             data = json.load(response)
+        from runtime_storage import database_path,storage_id
+        config_file=Path(root)/'backend/config.json'
+        cfg=json.loads(config_file.read_text(encoding='utf-8')) if config_file.exists() else {}
+        expected=storage_id(database_path(root,cfg))
+        if data.get('database_instance') and data['database_instance']!=expected:return False
+        if cfg.get('data_dir') and not data.get('database_instance'):return False
         return data.get('app') == 'SOMESH ENTERPRISES' and data.get('instance') == instance_id(root) and data.get('database') == 'ok'
     except (OSError, ValueError, urllib.error.URLError):
         return False
@@ -70,7 +76,10 @@ def print_addresses(config, browser_url):
 
 
 def check_database(root=ROOT):
-    db = Path(root) / 'data/monthly_cycle.db'
+    from runtime_storage import database_path
+    config_file=Path(root)/'backend/config.json'
+    config=json.loads(config_file.read_text(encoding='utf-8')) if config_file.exists() else {}
+    db = database_path(root,config)
     if not db.is_file():
         return 'new'
     import sqlite3
@@ -85,7 +94,10 @@ def check_database(root=ROOT):
 
 
 def startup_backup(root=ROOT):
-    if not (Path(root) / 'data/monthly_cycle.db').is_file():
+    from runtime_storage import database_path
+    config_file=Path(root)/'backend/config.json'
+    config=json.loads(config_file.read_text(encoding='utf-8')) if config_file.exists() else {}
+    if not database_path(root,config).is_file():
         return None
     sys.path.insert(0, str(Path(root) / 'tools'))
     from backup_db import backup
@@ -106,6 +118,7 @@ def open_browser(url):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--demo', action='store_true')
+    parser.add_argument('--initialize', action='store_true', help='Explicitly initialize a new installation only when no configured database exists')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--no-pause', action='store_true', help='BAT automation: no prompt on failure')
     parser.add_argument('--check', action='store_true', help='Validate files and dependencies without starting a server')
@@ -113,10 +126,27 @@ def main(argv=None):
     args = parser.parse_args(argv)
     for name in ('config', 'users', 'workflow'):
         target, example = ROOT / f'backend/{name}.json', ROOT / f'backend/{name}.example.json'
+        from runtime_storage import database_path
+        early_path=ROOT/'backend/config.json'
+        try:early_config=json.loads(early_path.read_text(encoding='utf-8')) if early_path.exists() else {}
+        except (OSError,ValueError) as error:
+            print('Invalid existing configuration; no defaults copied: '+str(error),flush=True);return 1
+        existing_database=database_path(ROOT,early_config)
+        existing_db=existing_database.is_file()
+        if not target.exists() and existing_db:
+            if name=='users':
+                from runtime_storage import stored_profiles
+                if stored_profiles(existing_database) is not None:continue
+            print('Existing database has missing '+name+'.json; restore its verified configuration. No defaults copied.',flush=True);return 1
         if not target.exists() and example.is_file():
             shutil.copyfile(example, target)
             print('Created local ' + target.name + ' from the safe example.', flush=True)
     for relative in ('backend/app.py', 'backend/config.json', 'backend/users.json', 'backend/workflow.json', 'frontend/index.html'):
+        if relative=='backend/users.json' and not (ROOT/relative).is_file():
+            from runtime_storage import stored_profiles
+            cfg=json.loads((ROOT/'backend/config.json').read_text(encoding='utf-8'))
+            from runtime_storage import database_path
+            if stored_profiles(database_path(ROOT,cfg)) is not None:continue
         if not (ROOT / relative).is_file():
             print('Missing required file: ' + relative, flush=True)
             return 1
@@ -140,6 +170,13 @@ def main(argv=None):
             if https['port'] == port or not 1 <= https['port'] <= 65535:
                 raise ValueError('network.https.port must be a free port different from the HTTP port')
         db_state = check_database()
+        from runtime_storage import database_path,stored_profiles,validate_profiles
+        active_db=database_path(ROOT,config)
+        if db_state=='new' and config.get('environment','production') not in ('development','test') and not args.initialize:raise ValueError('Configured database is missing: '+str(active_db)+'. Restore the data directory or use --initialize only for a new installation.')
+        profiles=stored_profiles(active_db)
+        if profiles is None:profiles=json.loads((ROOT/'backend/users.json').read_text(encoding='utf-8')).get('users')
+        validate_profiles(profiles)
+        print('Runtime:',config.get('environment','production'),'| Database:',active_db,'| Active profiles:',len(profiles),flush=True)
     except (ImportError, ValueError, OSError) as error:
         print('Startup configuration/dependency error: ' + str(error), flush=True)
         return 1
@@ -193,7 +230,9 @@ def main(argv=None):
                 return 1
         command = [sys.executable, '-u', str(ROOT / 'backend/app.py')]
         if args.demo: command.append('--demo')
-        child = subprocess.Popen(command, cwd=str(ROOT))
+        child_env=dict(os.environ)
+        if args.initialize:child_env['SOMESH_INITIALIZE']='1'
+        child = subprocess.Popen(command, cwd=str(ROOT),env=child_env)
         try:
             for _ in range(150):
                 if child.poll() is not None:

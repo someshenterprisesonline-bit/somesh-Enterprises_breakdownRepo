@@ -12,10 +12,12 @@ def main():
     app = AppFixture()
     try:
         info = app.seed_browser()
-        if "--excel" in sys.argv or '--all-employees' in sys.argv or "--themes" in sys.argv:
+        if "--critical" in sys.argv or "--improvements" in sys.argv or "--formulas" in sys.argv or "--excel" in sys.argv or '--all-employees' in sys.argv or "--themes" in sys.argv:
             from test_excel_workspace import sample
             from test_document_workspace import seed_documents
-            info['excel'] = seed_documents(app, actual=bool(os.environ.get('EXCEL_REFERENCE_ROOT')),assign='--all-employees' not in sys.argv)
+            from test_formula_engine import template, payload
+            from test_neft_sync import neft_file
+            info['excel'] = seed_documents(app, actual=bool(os.environ.get('EXCEL_REFERENCE_ROOT')),assign='--all-employees' not in sys.argv and '--improvements' not in sys.argv and '--critical' not in sys.argv,worksheet_data=payload(template()) if '--formulas' in sys.argv or '--improvements' in sys.argv or '--critical' in sys.argv else None,neft_data=neft_file() if '--improvements' in sys.argv or '--critical' in sys.argv else None)
             from test_document_workspace import letter_sample
             letter = app.root / 'letter.docx'
             letter.write_bytes(letter_sample())
@@ -50,7 +52,22 @@ def main():
         if "--themes" in sys.argv: script = "theme-baseline.cjs" if os.environ.get("THEME_BASELINE") else "themes.cjs"
         if '--neft' in sys.argv: script = 'neft-sync.cjs'
         if '--lan' in sys.argv: script = 'lan-sync.cjs'
+        if '--formulas' in sys.argv: script = 'formula-engine.cjs'
+        if '--improvements' in sys.argv: script = 'workspace-improvements.cjs'
+        if '--critical' in sys.argv: script = 'critical-sync-profiles.cjs'
         result = subprocess.call(["node", str(PROJECT / "tests" / script)], env=env)
+        if result==0 and '--critical' in sys.argv:
+            import shutil
+            evidence=PROJECT/'data'/'critical-audit'/os.environ.get('TEST_THEME','dark')
+            evidence.mkdir(parents=True,exist_ok=True)
+            for file in app.root.glob('critical-*.png'):shutil.copy2(file,evidence/file.name)
+            print('Critical screenshots:',evidence)
+        if result == 0 and ('--formulas' in sys.argv or '--improvements' in sys.argv):
+            import shutil
+            evidence=PROJECT/'data'/'formula-audit'/os.environ.get('TEST_THEME','light')
+            evidence.mkdir(parents=True,exist_ok=True)
+            for file in list(app.root.glob('formula-*.png'))+list(app.root.glob('workspace-*.png')):shutil.copy2(file,evidence/file.name)
+            print('Formula screenshots:',evidence)
         if result == 0 and '--neft' in sys.argv:
             import shutil
             import openpyxl

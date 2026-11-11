@@ -22,12 +22,18 @@ import storage as ST
 import excel_workspace as EW
 import shutil, secrets, math, gzip, ssl
 import lan as LAN
+import runtime_storage as RUNTIME
 
 BASE = os.path.dirname(os.path.abspath(__file__))          # backend/  (code + config.json, users.json, workflow.json)
 ROOT = os.path.dirname(BASE)                               # project root (data/, storage/, samples/ live here)
 FRONTEND = os.path.join(ROOT, "frontend")                  # the web page: index.html, css/, js/, assets/
 def load(name):
     path = os.path.join(BASE, name)
+    if name=='users.json' and 'CONFIG' in globals():
+        stored=RUNTIME.stored_profiles(RUNTIME.database_path(ROOT,CONFIG))
+        if stored is not None:return {'users':stored}
+    if name in ('config.json','workflow.json') and not os.path.isfile(path) and (os.path.isfile(os.path.join(ROOT,'data','monthly_cycle.db')) or ('CONFIG' in globals() and RUNTIME.database_path(ROOT,CONFIG).is_file())):
+        raise ValueError('Existing database detected but '+name+' is missing. Restore verified configuration; example settings were not copied.')
     example = os.path.join(BASE, name.replace(".json", ".example.json"))
     if not os.path.isfile(path) and name in ("config.json", "users.json", "workflow.json") and os.path.isfile(example):
         shutil.copyfile(example, path)
@@ -61,7 +67,11 @@ def demo_ids():
     return {r["id"] for r in q("SELECT id FROM bills WHERE demo=1")}
 def setting(key, default=True):
     return FLOW.get("settings", {}).get(key, default)
-DB_PATH = os.path.join(ROOT, "data", "monthly_cycle.db")
+DB_PATH = str(RUNTIME.database_path(ROOT,CONFIG))
+ENVIRONMENT = CONFIG.get("environment","production")
+if not os.path.exists(DB_PATH) and ENVIRONMENT not in ("test","development") and os.environ.get("SOMESH_INITIALIZE")!="1":
+    raise ValueError("Configured office database does not exist: "+DB_PATH+". Check the data directory or explicitly initialize a new installation; no empty database was created.")
+RUNTIME.validate_profiles(USERS)
 LOCK = threading.RLock()
 
 def now():
@@ -2030,13 +2040,13 @@ class H(BaseHTTPRequestHandler):
             from launcher import instance_id
             q("SELECT 1")
             return self.send_json({"app": APP_NAME, "version": APP_VERSION, "instance": instance_id(ROOT), "database": "ok",
-                                   "https_port": NET["https"]["port"] if HTTPS_ON[0] else None})
+                                   "https_port": NET["https"]["port"] if HTTPS_ON[0] else None, "environment":ENVIRONMENT,"database_instance":RUNTIME.storage_id(DB_PATH)})
         if u.path == "/office-ca.crt":   # public half of the office CA, for employee PCs to trust the HTTPS address
             fp = os.path.join(ROOT, LAN.CA_FILE)
             if not os.path.isfile(fp): return self.send_json({"error": "HTTPS has not been set up on this server"}, 404)
             with open(fp, "rb") as f: return self.send_bytes(f.read(), "application/x-x509-ca-cert", "office-ca.crt")
         if u.path == "/api/meta":
-            return self.send_json({"users": [{k: v for k, v in x_.items() if k != "email"} for x_ in USERS], "stages": FLOW["stages"],
+            return self.send_json({"runtime":{"environment":ENVIRONMENT,"profile_source":"SQLite employees","profile_count":len(USERS)},"users": [{k: v for k, v in x_.items() if k != "email"} for x_ in USERS], "stages": FLOW["stages"],
                                    "demo_speed": speed(), "app_name": APP_NAME, "server_now": ts(), "start_stage": FLOW.get("start_stage"),
                                    "handoff_base": os.path.join(storage_root(), ST.HANDOFF) if storage_on() else "", "sep": os.sep,
                                    "storage": storage_on(), "email": bool(CONFIG.get("email", {}).get("enabled")), "lunch": lunch_cfg(), "has_demo": bool(demo_ids())})
@@ -2403,6 +2413,7 @@ def bill_detail(bid):
     return {"bill": b, "tasks": tasks, "files": files, "contract": contract, "events": q("SELECT * FROM events WHERE bill_id=? ORDER BY id DESC", (bid,))}
 
 def main():
+    print("Runtime environment:",ENVIRONMENT,"| Database:",DB_PATH,"| Profiles: SQLite employees (",len(USERS),")",flush=True)
     load_adhoc()
     if "--template" in sys.argv:
         out = os.path.join(ROOT, "samples", "Workflow_Input_Template.xlsx")

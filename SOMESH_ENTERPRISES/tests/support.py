@@ -41,7 +41,7 @@ class AppFixture:
         stages[1]["branch"] = {"question": "Additional details?", "options": {"Yes": ["S02A"], "No": []}}
         stages[-1]["requires"] = ["S02"]
         stages[-1]["optional_requires"] = ["S02A"]
-        config = {"host": "127.0.0.1", "port": 0, "security": {"admin_pin": self.pin},
+        config = {"environment":"test","host": "127.0.0.1", "port": 0, "security": {"admin_pin": self.pin},
                   "storage": {"enabled": False}, "lunch": {"enabled": False, "start": "13:00", "end": "14:00"},
                   "automation": {"auto_start": False, "monthly_open_day": 0}}
         flow = {"stages": stages, "start_stage": "S01", "final_stages": ["S03"], "settings": {"demo_speed": 1}}

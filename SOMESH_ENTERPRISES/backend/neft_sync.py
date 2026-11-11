@@ -4,6 +4,8 @@ import io
 import json
 import re
 import uuid
+import designation_lookup as DESIGNATIONS
+import worksheet_neft_sync as REVERSE
 from decimal import Decimal, InvalidOperation
 
 import openpyxl
@@ -26,7 +28,7 @@ CREATE TABLE IF NOT EXISTS ew_neft_members(source_id TEXT PRIMARY KEY,book TEXT,
 
 
 def init(g):
-    g['DB'].executescript(SCHEMA)
+    g['DB'].executescript(SCHEMA + DESIGNATIONS.SCHEMA + REVERSE.SCHEMA)
 
 
 def ew():
@@ -130,7 +132,10 @@ def describe(g, b, s):
     return {'column': setting['col'] if setting else 0, 'direction': setting['direction'] if setting else 'original',
             'source_sheet': s.title, 'target': link['target'] if link else None,
             'target_revision': (g['DB'].execute('SELECT revision FROM ew_books WHERE id=?', (link['target'],)).fetchone() or [0])[0] if link and link['target'] else 0, 'status': link['status'] if link else 'waiting',
-            'error': link['error'] if link else '', 'salary_note': link['salary_note'] if link else ''}
+            'records':g['DB'].execute('SELECT count(*) FROM ew_neft_members WHERE book=? AND sheet=?',(b['id'],s.title)).fetchone()[0],
+            'error': link['error'] if link else '', 'salary_note': link['salary_note'] if link else '',
+            'designation_values': [{'address':'C'+str(r['position']),'value':r['value']} for r in g['DB'].execute("SELECT r.position,d.value FROM ew_designations d JOIN ew_neft_rows r ON r.id=d.row_id WHERE d.book=? AND d.sheet=? AND r.active=1 AND d.status!='manual'",(b['id'],s.title))],
+            'designation_notes': [dict(r) for r in g['DB'].execute("SELECT r.position AS row,d.status FROM ew_designations d JOIN ew_neft_rows r ON r.id=d.row_id WHERE d.book=? AND d.sheet=? AND r.active=1 AND d.status IN ('unknown','blank','ambiguous')",(b['id'],s.title))]}
 
 
 def adjust_formula(formula, current, target, mapping):
@@ -234,8 +239,14 @@ def ensure_link(g, actor, b, s, target_id=None):
         target = E.book(g, actor, target_id, 'edit')
         if target['owner'] != b['owner'] or target['master'] or E.category(target) != 'worksheet':
             raise g['Denied']('Choose a private Worksheet belonging to the NEFT document owner.')
-        if db.execute('SELECT 1 FROM ew_neft_links WHERE target=?', (target_id,)).fetchone():
-            E.fail(g, 'This Worksheet is already linked to another NEFT document.')
+        occupied=db.execute('SELECT * FROM ew_neft_links WHERE target=?',(target_id,)).fetchone()
+        if occupied and occupied['book']!=b['id']:
+            old=E.book(g,actor,occupied['book']);first=db.execute('SELECT changes FROM ew_versions WHERE book=? ORDER BY revision LIMIT 1',(old['id'],)).fetchone()
+            ow=E.read(E.data_for(g,old),g);os=ow[occupied['sheet']];salary=columns(os,True)['salary']
+            bank=any(c.value not in (None,'') and c.data_type!='f' for row in os.iter_rows(min_row=bounds(os)[0],max_row=bounds(os)[1]) for c in row if c.column not in (1,2,3,salary))
+            if not first or json.loads(first[0]).get('created_for_worksheet')!=target_id or bank:E.fail(g,'This Worksheet is already linked to another NEFT document with employee/banking history. Review the existing link.')
+            db.execute('DELETE FROM ew_neft_members WHERE book=? AND sheet=?',(old['id'],occupied['sheet']))
+            db.execute('DELETE FROM ew_neft_links WHERE book=? AND sheet=?',(old['id'],occupied['sheet']))
         data = E.data_for(g, target); w = E.read(data, g)
     else:
         templates = [t for t in E.template_library(g, b['owner']) if t['category'] == 'worksheet' and t['can_edit'] and not t['locked']]
@@ -260,6 +271,12 @@ def ensure_link(g, actor, b, s, target_id=None):
 def sync(g, actor, b, s, original, target_id=None):
     E = ew(); db = g['DB']; source_cols = columns(s, True)
     link = ensure_link(g, actor, b, s, target_id)
+    edits,_=DESIGNATIONS.apply(g,b,s,{})
+    if edits:
+        original=serialize(s.parent,original)
+        E.write_version(g,b,actor,original,{'designation_lookup':True,'cells':edits})
+        b['revision']+=1
+        reconcile(g,b,s,{})
     target = E.book(g, actor, link['target'], 'edit')
     if target['owner'] != b['owner']: raise g['Denied']('Document owners must match.')
     target_data = E.data_for(g, target); w = E.read(target_data, g); ws = w[link['target_sheet']]
@@ -267,7 +284,7 @@ def sync(g, actor, b, s, original, target_id=None):
     if not target_cols: E.fail(g, 'Worksheet employee headers have changed; synchronize after restoring them.')
     cached_source = openpyxl.load_workbook(io.BytesIO(original), data_only=True)[s.title]
     registry = {r['position']: dict(r) for r in db.execute('SELECT * FROM ew_neft_rows WHERE book=? AND sheet=? AND active=1', (b['id'], s.title))}
-    source_rows = [r for r in order(g, b, s, list(registry)) if any(value(s, cached_source, r, c) not in (None, '') for c in (1, 2, 3))]
+    source_rows = [r for r in order(g, b, s, list(registry)) if str(value(s,cached_source,r,2) or '').strip()]
     members = {r['source_id']: dict(r) for r in db.execute('SELECT * FROM ew_neft_members WHERE book=? AND sheet=?', (b['id'], s.title))}
     start, end = bounds(ws); original_end = end; original_max_row = ws.max_row
     old_positions = set(range(start, end + 1)); reserved = {m['position'] for m in members.values()}
@@ -291,9 +308,14 @@ def sync(g, actor, b, s, original, target_id=None):
                 for cell in ws[at]:
                     if cell.data_type == 'f': cell.value = None  # no new formulas in completed uploads
             end += 1; old_positions.add(at); old_position = at
+        if member is None and old_position in unclaimed:
+            db.execute('INSERT OR REPLACE INTO ew_designation_sources VALUES (?,?)',(rid,str(ws.cell(old_position,3).value or '')))
         used.add(old_position); cells = snapshot(ws, old_position)
         values = {str(c): value(s, cached_source, row, c) for c in (1, 2, 3)}
-        if source_cols['salary'] and target_cols['salary']:
+        generated=db.execute('SELECT last_values FROM ew_neft_reverse WHERE row_id=?',(rid,)).fetchone()
+        generated_pay=json.loads(generated['last_values']).get(str(source_cols['salary'])) if generated and source_cols['salary'] else object()
+        reverse_pay=source_cols['salary'] and REVERSE.same_value(s.cell(row,source_cols['salary']).value,generated_pay)
+        if source_cols['salary'] and target_cols['salary'] and not reverse_pay:
             c = target_cols['salary']; incoming = value(s, cached_source, row, source_cols['salary'])
             if ws.cell(old_position, c).data_type == 'f':
                 salary_note = 'Net Salary formulas preserved; salary amounts are not copied into calculated cells.'
@@ -310,8 +332,10 @@ def sync(g, actor, b, s, original, target_id=None):
         last = json.loads(member['last_values']) if member else {}
         for key, incoming in values.items():
             c = int(key); current = cells[c - 1].value
+            auto=db.execute('SELECT status FROM ew_designations WHERE row_id=?',(rid,)).fetchone()
+            if c==3 and incoming in (None,'') and auto and auto['status'] in ('unknown','ambiguous','blank') and current not in (None,''):continue
             if cells[c - 1].data_type == 'f': E.fail(g, 'A mapped employee field contains a formula; it was preserved.')
-            allowed = current in (None, '') or current == incoming or (key in last and current == last[key])
+            allowed = current in (None, '') or current == incoming or (key in last and current == last[key]) or (c in (2,3) and DESIGNATIONS.name_key(current)==DESIGNATIONS.name_key(incoming))
             if not allowed:
                 E.fail(g, f'Worksheet {get_column_letter(c)}{old_position} has a manual value. Review it before retrying synchronization.')
             cells[c - 1].value = incoming
@@ -361,7 +385,7 @@ def sync(g, actor, b, s, original, target_id=None):
     same_values = all(content(same[sh]) == content(w[sh]) and dict(same[sh].row_dimensions) == dict(w[sh].row_dimensions) for sh in w.sheetnames)
     if not same_values:
         E.write_version(g, target, actor, data, {'neft_sync': b['id'], 'sheet': s.title, 'employees': len(source_rows)})
-    db.execute("UPDATE ew_neft_links SET status='synced',error='',salary_note=? WHERE book=? AND sheet=?", (salary_note, b['id'], s.title))
+    db.execute("UPDATE ew_neft_links SET status=?,error='',salary_note=? WHERE book=? AND sheet=?", ('synced' if source_rows else 'empty',salary_note, b['id'], s.title))
     return describe(g, b, s)
 
 
@@ -388,11 +412,24 @@ def after_commit(g, actor, b, data, changes):
             if op['action'] == 'delete':
                 g['DB'].execute('DELETE FROM ew_neft_members WHERE book=? AND sheet=? AND position=?', (*params, at))
             g['DB'].execute('UPDATE ew_neft_members SET position=position+? WHERE book=? AND sheet=? AND position>=?', (1 if op['action'] == 'add' else -1, *params, at if op['action'] == 'add' else at + 1))
+    if ew().category(b) == 'worksheet' and 'permissions' not in changes:
+        DESIGNATIONS.refresh_sources(g,actor,b,changes)
+        w=ew().read(data,g)
+        if any(columns(ws) for ws in w):return REVERSE.attempt(g,actor,b,data,changes)
     if ew().category(b) != 'neft' or 'permissions' in changes: return None
     w = ew().read(data, g); result = None
     for s in w:
         if not columns(s, True): continue
         reconcile(g, b, s, changes)
+        for edit in changes.get('cells',[]):
+            if edit.get('sheet')==s.title and re.fullmatch(r'C[0-9]+',edit.get('address','')):
+                g['DB'].execute("INSERT OR REPLACE INTO ew_designations SELECT id,book,sheet,?,?, 'manual' FROM ew_neft_rows WHERE book=? AND sheet=? AND position=? AND active=1",(DESIGNATIONS.name_key(s.cell(s[edit['address']].row,2).value),str(s[edit['address']].value or ''),b['id'],s.title,s[edit['address']].row))
+        edits,_=DESIGNATIONS.apply(g,b,s,{})
+        if edits:
+            data=serialize(w,data)
+            ew().write_version(g,b,actor,data,{'designation_lookup':True,'cells':edits})
+            b['revision']+=1
+            reconcile(g,b,s,{})
         start, end = bounds(s)
         if not any(any(s.cell(r, c).value not in (None, '') for c in (1, 2, 3)) for r in range(start, end + 1)):
             if not g['DB'].execute('SELECT 1 FROM ew_neft_links WHERE book=? AND sheet=?', (b['id'], s.title)).fetchone(): continue
@@ -418,6 +455,27 @@ def command(g, actor, b, body):
             E.fail(g, 'Choose S.No, Name or Designation and a valid sorting direction.')
         if direction == 'original': col = 0
         g['DB'].execute('INSERT INTO ew_neft_sort VALUES (?,?,?,?) ON CONFLICT(book,sheet) DO UPDATE SET col=excluded.col,direction=excluded.direction', (b['id'], name, col, direction))
+    if body.get('action')=='retry':
+        link=ensure_link(g,actor,b,s,body.get('target'))
+        target=E.book(g,actor,link['target'],'edit')
+        reverse_state=REVERSE.describe(g,target['id'])
+        lo,hi=bounds(s)
+        has_names=any(str(s.cell(r,2).value or '').strip() for r in range(lo,hi+1))
+        state=REVERSE.attempt(g,actor,target,E.data_for(g,target),{'retry':True}) if not has_names or (reverse_state and reverse_state['status']=='error') else attempt(g,actor,b,s,data)
+        g['DB'].commit()
+        return {'ok':True,'id':b['id'],'revision':g['DB'].execute('SELECT revision FROM ew_books WHERE id=?',(b['id'],)).fetchone()[0],'neft_sync':describe(g,b,s),'worksheet_sync':state}
+    if body.get('action')=='designations':
+        edits,_=DESIGNATIONS.apply(g,b,s,{},replace=True)
+        if edits:
+            data=serialize(w,data)
+            E.write_version(g,b,actor,data,{'designation_replace':True,'cells':edits})
+            b['revision']+=1
+            reconcile(g,b,s,{})
     result = attempt(g, actor, b, s, data, body.get('target'))
+    if body.get('action')=='designations' and result and result['status']=='synced':
+        linked=ensure_link(g,actor,b,s)
+        target=E.book(g,actor,linked['target'],'edit')
+        REVERSE.attempt(g,actor,target,E.data_for(g,target),{'retry':True})
+        result=describe(g,b,s)
     response = E.write_version(g, b, actor, data, {'neft_action': body.get('action', 'sync'), 'sheet': name}) if body.get('action') == 'sort' else {'ok': True, 'id': b['id'], 'revision': b['revision']}
     g['DB'].commit(); response['neft_sync'] = result; return response

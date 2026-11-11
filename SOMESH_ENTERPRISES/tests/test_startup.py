@@ -108,4 +108,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / 'backend/config.json').read_text())['security']['admin_pin'], '')
         env['SOMESH_ADMIN_PIN'] = self.fixture.pin
         result = subprocess.run(self.command('START SOMESH ENTERPRISES.bat', '--check'), env=env, capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('database is missing',result.stdout)
+        result = subprocess.run(self.command('START SOMESH ENTERPRISES.bat', '--check','--initialize'), env=env, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

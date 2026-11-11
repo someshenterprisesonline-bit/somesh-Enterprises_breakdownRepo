@@ -1,6 +1,6 @@
 "use strict";
 const XL={user:null,node:null,books:[],templates:[],panels:new Map(),epoch:0,controllers:new Set(),libraryState:'idle',libraryError:'',libraryPromise:null,requestTimeout:20000};
-const XL_SECTIONS=[['neft','NEFT SHEET','xlsx'],['worksheet','WORKSHEET','xlsx'],['letter','COVERING LETTER','docx']];
+const XL_SECTIONS=[['worksheet','WORKSHEET','xlsx'],['neft','NEFT SHEET','xlsx'],['letter','COVERING LETTER','docx']];
 const xlEligible=()=>isAdmin()||['nandha','jagadeeshwari','sudharsan','rupashri'].includes(String(S.meta?.users.find(u=>u.name===S.user)?.identity_name||S.user||'').toLowerCase());
 const xlDirty=()=>[...XL.panels.values()].some(p=>p.dirty());
 function viewExcel(){return '<div id="excelHost"></div>';}
@@ -40,7 +40,7 @@ function wireExcel(){
  document.body.classList.toggle('xl-wide',S.tab==='excel');if(S.tab!=='excel')return;if(XL.user!==S.user)xlResetSession();
  if(!XL.node){
   XL.node=document.createElement('section');XL.node.className='xl-workspace';
-  XL.node.innerHTML=`<div class="xl-heading"><div><h1>Excel Workspace</h1><p class="muted">${esc(S.user)} · Your documents stay private.</p></div>${xlButton('back','Back')}${xlButton('refresh','Synchronize')}<button class="btn" type="button" data-xl="retrylibrary" hidden>Retry templates</button></div><p class="xl-status" role="status">Loading documents...</p><div class="xl-sections"></div>`;
+  XL.node.innerHTML=`<div class="xl-heading"><div><h1>Excel Workspace</h1><p class="muted">${esc(S.user)} · Your documents stay private.</p></div>${xlButton('back','Back')}${xlButton('refresh','Synchronize')}<button class="btn" type="button" data-xl="retrylibrary" hidden>Retry templates</button></div>${typeof runtimeNotice==='function'?runtimeNotice():''}<p class="xl-status" role="status">Loading documents...</p><div class="xl-sections"></div>`;
   $('#excelHost').append(XL.node);
   for(const [key,title,format] of XL_SECTIONS){const p=new ExcelSection(key,title,format);XL.panels.set(key,p);$('.xl-sections',XL.node).append(p.root);}
   $('[data-xl="back"]',XL.node).onclick=()=>{S.tab=isAdmin()?'dash':'mine';render();};
@@ -56,19 +56,19 @@ class ExcelSection{
   this.root=document.createElement('article');this.root.className='xl-section';this.root.dataset.section=key;
   this.root.innerHTML=`<div class="xl-section-head"><button type="button" class="xl-title" aria-expanded="false"><h2>${title}</h2><small class="xl-original-name"></small></button><div class="xl-header-actions">${xlButton('upload','Upload Completed File')}${xlButton('blank','New Blank Template')}${xlButton('edit','Edit')}${xlButton('download',format==='docx'?'Download Word':'Download Excel')}${xlButton('expand',format==='docx'?'Preview':'Expand')}</div></div><div class="xl-file-line"><label>Open <select class="in xl-file" aria-label="${title} saved files"></select></label><span class="xl-file-state"></span></div><div class="xl-reveal"><div><div class="xl-section-body"><p class="xl-message" role="status"></p><button type="button" class="btn" data-xl="retry" hidden>Retry preview</button><div class="xl-editor-host"></div></div></div></div><input class="xl-file-input" type="file" accept=".${format}" hidden>`;
   $('.xl-title',this.root).onclick=()=>{this.pinned=true;this.run(()=>this.expand(true));};
-  this.root.onpointerenter=e=>{if(e.pointerType==='touch')return;clearTimeout(this.closeTimer);clearTimeout(this.hoverTimer);this.hoverTimer=setTimeout(()=>this.run(()=>this.expand(false)),120);};
+  this.root.onpointermove=e=>{if(e.pointerType==='touch')return;clearTimeout(this.closeTimer);if(this.open)return;clearTimeout(this.hoverTimer);this.hoverTimer=setTimeout(()=>this.run(()=>this.expand(false)),120);};
   this.root.onpointerleave=()=>{clearTimeout(this.hoverTimer);this.closeTimer=setTimeout(()=>{if(!this.pinned&&!this.dirty()&&!this.root.contains(document.activeElement))this.collapse();},260);};
-  $('.xl-file',this.root).onchange=e=>this.run(async()=>{if(this.dirty()&&!confirm('Discard unsaved changes in this document?')){e.target.value=this.preview?'':this.id;return;}this.resetDraft();this.id=e.target.value||this.template()?.id||null;this.preview=!e.target.value;this.sheet=null;this.offset=0;this.query='';this.filter='';this.sort='';this.column='0';this.widths.clear();await this.expand(true,true);});
+  $('.xl-file',this.root).onchange=e=>{const selectedId=e.target.value;return this.run(async()=>{if(this.dirty()&&!confirm('Discard unsaved changes in this document?')){e.target.value=this.preview?'':this.id;return;}this.resetDraft();this.id=selectedId||this.template()?.id||null;this.preview=!selectedId;this.sheet=null;this.offset=0;this.query='';this.filter='';this.sort='';this.column='0';this.widths.clear();await this.expand(true,true);});};
   $('.xl-reveal',this.root).inert=true;
   $('.xl-file-input',this.root).onchange=e=>{const f=e.target.files[0];if(f)this.run(()=>this.upload(f));e.target.value='';};this.bind(this.root);
  }
- dispose(){this.disposed=true;clearTimeout(this.closeTimer);clearTimeout(this.hoverTimer);clearTimeout(this.calcTimer);this.calcSequence++;for(const dialog of this.dialogs){dialog.dispatchEvent(new Event('cancel'));dialog.close();dialog.remove();}this.dialogs.clear();}
+ dispose(){this.disposed=true;clearTimeout(this.closeTimer);clearTimeout(this.hoverTimer);clearTimeout(this.calcTimer);clearTimeout(this.saveTimer);this.calcSequence++;for(const dialog of this.dialogs){dialog.dispatchEvent(new Event('cancel'));dialog.close();dialog.remove();}this.dialogs.clear();}
  alive(){return !this.disposed&&this.epoch===XL.epoch&&this.owner===S.user&&this.token===S.token;}
  assertAlive(){if(!this.alive())throw xlCancelled();}
  request(path,body,raw=false){this.assertAlive();return xlRequest(path,body,{epoch:this.epoch,user:this.owner,token:this.token,raw});}
  template(){return XL.templates.find(t=>t.category===this.key);}
  dirty(){return this.changes.size>0;}
- resetDraft(){this.changes.clear();this.touched.clear();this.baselines.clear();this.calculations.clear();this.undo=[];this.redo=[];this.selection=null;this.calcSequence++;clearTimeout(this.calcTimer);}
+ resetDraft(){this.changes.clear();this.touched.clear();this.baselines.clear();this.calculations.clear();this.undo=[];this.redo=[];this.selection=null;this.calcSequence++;clearTimeout(this.calcTimer);clearTimeout(this.saveTimer);}
  message(text,error=false){if(!this.alive())return;const el=$('.xl-message',this.root);el.textContent=text;el.classList.toggle('xl-error',error);el.setAttribute('role',error?'alert':'status');}
  setState(state,text){if(!this.alive())return;this.state=state;this.root.dataset.loadState=state;this.root.setAttribute('aria-busy',state==='loading'?'true':'false');const retry=this.root.querySelector('[data-xl="retry"]');if(retry)retry.hidden=state!=='error';this.message(text,state==='error');}
  async run(fn){const work=(this.pending||Promise.resolve()).then(async()=>{if(!this.alive())return;this.busy=true;this.root.setAttribute('aria-busy','true');try{await fn();}catch(e){if(this.alive()&&e.name!=='AbortError'){this.setState('error',e.message);xlStatus(e.message,true);}}finally{this.busy=false;this.root.setAttribute('aria-busy','false');}});this.pending=work;return work;}
@@ -95,14 +95,14 @@ class ExcelSection{
   if(this.format==='docx'){this.document=result.document;this.grid=null;this.drawDocument();this.loaded();}else{this.sheet=this.sheet&&result.sheets.some(s=>s.name===this.sheet)?this.sheet:result.sheets[0].name;await this.loadGrid();}
   }catch(e){if(this.alive()&&e.name!=='AbortError')this.setState('error',e.message);throw e;}
  }
- loaded(){this.setState('ready',this.preview?'Blank preview ready. Select New Blank Template to start your own document.':this.dirty()?`${this.changes.size} unsaved changes`:'All changes saved.');this.options();}
+ loaded(){this.setState('ready',this.preview?'Blank preview ready. Select New Blank Template to start your own document.':this.dirty()?`${this.changes.size} unsaved changes`:'All changes saved.');this.options();if(this.key==='worksheet'&&this.grid?.worksheet_sync&&!this.dirty())this.message(xlSyncText(this.grid.worksheet_sync),this.grid.worksheet_sync.status==='error');}
  async loadGrid(){
   this.assertAlive();this.setState('loading','Loading worksheet...');try{const params=new URLSearchParams({id:this.id,template:this.preview?'1':'0',sheet:this.sheet,offset:this.offset,limit:50,q:this.query,column:this.column,filter:this.filter,sort:this.sort,direction:this.direction}),grid=await this.request('/api/excel/sheet?'+params);
   if(this.dirty()&&this.book&&grid.book.revision!==this.book.revision)throw new Error('Conflict: synchronize after saving or resetting your draft.');this.grid=grid;this.book=grid.book;this.drawEditor();this.loaded();if(this.dirty())this.scheduleCalculation();
   }catch(e){if(this.alive()&&e.name!=='AbortError')this.setState('error',e.message);throw e;}
  }
  bind(root){root.querySelectorAll('[data-xl]').forEach(b=>b.onclick=e=>{e.stopPropagation();this.run(()=>this.action(b.dataset.xl));});}
- tools(){return `<div class="xl-editor-bar">${xlButton('save','Save Changes',this.preview||this.book?.locked||(!isAdmin()&&!this.book?.can_edit))}${xlButton('undo','Undo',this.preview)}${xlButton('redo','Redo',this.preview)}${xlButton('reset','Reset Unsaved Changes',this.preview)}${xlButton('newtab','Open in New Tab',this.preview)}${xlButton('close','Close / Collapse')}</div>`;}
+ tools(){return `<div class="xl-editor-bar">${xlButton('save','Save Changes',this.preview||this.book?.locked||(!isAdmin()&&!this.book?.can_edit))}${xlButton('undo','Undo',this.preview)}${xlButton('redo','Redo',this.preview)}${xlButton('reset','Reset Unsaved Changes',this.preview)}${xlButton('newtab','Open in New Tab',this.preview)}${this.key==='worksheet'?xlButton('retryworksheet','Retry NEFT sync',this.preview):''}${xlButton('close','Close / Collapse')}</div>`;}
  drawEditor(){
   const host=$('.xl-editor-host',this.root),g=this.grid;
   host.innerHTML=`<div class="xl-editor">${this.tools()}<div class="xl-grid-tools"><label>Worksheet <select class="in xl-sheet">${this.meta.sheets.map(s=>`<option ${s.name===this.sheet?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label><label>Search <input class="in xl-search" type="search" value="${esc(this.query)}"></label><label>Column <select class="in xl-column"><option value="0">All</option>${Array.from({length:g.columns},(_,i)=>`<option value="${i+1}" ${this.column===String(i+1)?'selected':''}>${xlLetter(i+1)}</option>`).join('')}</select></label><label>Filter <input class="in xl-filter" value="${esc(this.filter)}"></label>${xlButton('search','Apply')}<details class="xl-more"><summary>Rows and cell tools</summary><div>${xlButton('add','Add row',this.preview)}${xlButton('delete','Delete row',this.preview)}<label>Row <input class="in xl-row" type="number" placeholder="End of sheet"></label><label>Empty cell type <select class="in xl-type"><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option></select></label></div></details></div><div class="xl-grid-wrap" tabindex="0"><table class="xl-grid" aria-label="${esc(this.sheet)}"></table></div><div class="xl-pagination">${xlButton('prev','Previous',!this.offset)}<span>${g.total?g.offset+1:0}–${Math.min(g.total,g.offset+50)} of ${g.total} rows</span>${xlButton('next','Next',g.offset+50>=g.total)}</div>${isAdmin()?this.admin():''}</div>`;
@@ -110,7 +110,7 @@ class ExcelSection{
  }
  drawTable(){
   const table=$('.xl-grid',this.root),g=this.grid;if(!table)return;
-  table.innerHTML=`<thead><tr><th>#</th>${Array.from({length:g.columns},(_,i)=>`<th style="${this.widths.has(i+1)?'width:'+this.widths.get(i+1)+'px;min-width:'+this.widths.get(i+1)+'px':''}"><button type="button" data-sort="${i+1}">${xlLetter(i+1)}</button><span class="xl-resizer" data-resize="${i+1}"></span></th>`).join('')}</tr>${g.header_rows.map(row=>`<tr class="xl-original-header"><th></th>${row.map(v=>`<th>${esc(v??'')}</th>`).join('')}</tr>`).join('')}</thead><tbody>${g.rows.map(r=>`<tr><th>${r.number}</th>${r.cells.map(c=>{const change=this.changes.get(this.sheet+'!'+c.address),calculation=this.calculations.get(this.sheet+'!'+c.address),value=change?change.value:c.formula?(calculation?.display??c.display??c.value):c.value;return `<td class="${c.formula?'xl-calculated ':''}${change?'xl-modified':''}"><input aria-label="${c.address}" data-cell="${c.address}" value="${esc(value)}" ${this.preview||!c.editable?'readonly':''} placeholder="${c.formula&&c.calculation==='pending'?'Recalculation pending':''}" title="${c.formula?'Calculated field':esc(c.address)}" spellcheck="false"></td>`;}).join('')}</tr>`).join('')}</tbody>`;
+  table.innerHTML=`<thead><tr><th>#</th>${Array.from({length:g.columns},(_,i)=>`<th style="${this.widths.has(i+1)?'width:'+this.widths.get(i+1)+'px;min-width:'+this.widths.get(i+1)+'px':''}"><button type="button" data-sort="${i+1}">${xlLetter(i+1)}</button><span class="xl-resizer" data-resize="${i+1}"></span></th>`).join('')}</tr>${g.header_rows.map(row=>`<tr class="xl-original-header"><th></th>${row.map(v=>`<th>${esc(v??'')}</th>`).join('')}</tr>`).join('')}</thead><tbody>${g.rows.map(r=>`<tr><th>${r.number}</th>${r.cells.map(c=>{const change=this.changes.get(this.sheet+'!'+c.address),calculation=this.calculations.get(this.sheet+'!'+c.address),value=change?change.value:c.formula?(calculation?.display??c.display??c.value):c.value;return `<td class="${c.formula?'xl-calculated ':''}${change?'xl-modified':''}"><input aria-label="${c.address}" data-cell="${c.address}" value="${esc(value)}" ${this.preview||!c.editable?'readonly':''} placeholder="${c.formula&&c.calculation==='pending'?'Recalculation pending':''}" title="${c.formula?esc(c.formula_expression||'Calculated field'):esc(c.address)}" spellcheck="false"></td>`;}).join('')}</tr>`).join('')}</tbody>`;
   $('thead',table).onpointerenter=()=>this.root.classList.add('xl-large');const cells=new Map(g.rows.flatMap(r=>r.cells).map(c=>[c.address,c]));
   table.querySelectorAll('[data-cell]').forEach(input=>{
    const cell=cells.get(input.dataset.cell);input.onfocus=()=>{this.pinned=true;};
@@ -123,8 +123,8 @@ class ExcelSection{
   table.querySelectorAll('[data-sort]').forEach(b=>b.onclick=()=>this.run(async()=>{this.direction=this.sort===b.dataset.sort&&this.direction==='asc'?'desc':'asc';this.sort=b.dataset.sort;this.offset=0;await this.loadGrid();}));
   table.querySelectorAll('[data-resize]').forEach(h=>h.onpointerdown=e=>{e.preventDefault();const th=h.parentElement,x=e.clientX,width=th.getBoundingClientRect().width;h.setPointerCapture(e.pointerId);h.onpointermove=ev=>{const size=Math.max(70,width+ev.clientX-x);th.style.width=th.style.minWidth=size+'px';this.widths.set(Number(h.dataset.resize),size);};h.onpointerup=()=>{h.onpointermove=null;};});
  }
- setCell(cell,value){const key=this.sheet+'!'+cell.address,before=this.changes.get(key)||null,type=cell.type==='n'&&cell.value===''?$('.xl-type',this.root).value:cell.type,after=value===cell.value?null:{sheet:this.sheet,address:cell.address,value,type};if(!this.baselines.has(key))this.baselines.set(key,{sheet:this.sheet,address:cell.address,value:cell.value,type});this.touched.set(key,after||this.baselines.get(key));if(after)this.changes.set(key,after);else this.changes.delete(key);this.undo.push({key,before,after});this.redo=[];this.edited();}
- edited(){this.pinned=true;this.message(`${this.changes.size} unsaved changes`);$('.xl-file-state',this.root).textContent='Unsaved changes';if(this.format==='xlsx')this.scheduleCalculation();}
+ setCell(cell,value){const key=this.sheet+'!'+cell.address,before=this.changes.get(key)||(this.key==='worksheet'?{sheet:this.sheet,address:cell.address,value:cell.value,type:cell.type}:null),type=cell.type==='n'&&cell.value===''?$('.xl-type',this.root).value:cell.type,after=value===cell.value?null:{sheet:this.sheet,address:cell.address,value,type};if(!this.baselines.has(key))this.baselines.set(key,{sheet:this.sheet,address:cell.address,value:cell.value,type});this.touched.set(key,after||this.baselines.get(key));if(after)this.changes.set(key,after);else this.changes.delete(key);this.undo.push({key,before,after});this.redo=[];this.edited();}
+ edited(){this.pinned=true;this.message(`${this.changes.size} unsaved changes`);$('.xl-file-state',this.root).textContent='Unsaved changes';if(this.format==='xlsx')this.scheduleCalculation();if(this.key==='worksheet'&&!this.preview){clearTimeout(this.saveTimer);this.saveTimer=setTimeout(()=>{if(this.alive()&&this.dirty())this.run(()=>this.save(true));},1200);}}
  scheduleCalculation(){clearTimeout(this.calcTimer);const sequence=++this.calcSequence;this.calcTimer=setTimeout(async()=>{try{const result=await this.request('/api/excel/calculate',{id:this.id,revision:this.book.revision,changes:[...this.touched.values()]});if(sequence!==this.calcSequence)return;this.calculations=new Map(result.calculations.map(c=>[c.sheet+'!'+c.address,c]));for(const c of result.calculations){if(c.sheet!==this.sheet)continue;const input=this.root.querySelector(`[data-cell="${c.address}"]`);if(input){input.value=c.display??c.value;input.placeholder=c.status==='pending'?'Recalculation pending':'';}}}catch(e){if(sequence===this.calcSequence)this.message(e.message,true);}},280);}
  paragraph(p){const changed=this.changes.get(String(p.index)),runs=p.runs.map(r=>`<span style="font-size:${Number(r.size)||12}pt;font-weight:${r.bold?'bold':'normal'};font-style:${r.italic?'italic':'normal'};text-decoration:${r.underline?'underline':'none'};font-family:${esc((r.font||'Times New Roman').replace(/[^a-zA-Z0-9 ,_-]/g,''))}">${esc(r.text)}</span>`).join('');return `<div class="xl-word-block">${(p.images||[]).map(img=>`<img class="xl-word-image" alt="Original document letterhead" draggable="false" src="data:${img.mime};base64,${img.data}">`).join('')}<div class="xl-word-paragraph" data-paragraph="${p.index}" role="textbox" aria-label="Paragraph ${p.index+1}" contenteditable="${!!(!this.preview&&!this.book.locked&&(isAdmin()||this.book.can_edit))}" style="text-align:${['left','right','center','both','justify'].includes(p.alignment)?p.alignment.replace('both','justify'):'left'}">${changed?esc(changed.text):runs||'<br>'}</div></div>`;}
  drawDocument(){
@@ -146,14 +146,29 @@ class ExcelSection{
   const confirmed=await new Promise(resolve=>{dialog.oncancel=()=>resolve(false);$('[data-cancel]',dialog).onclick=()=>{dialog.close();resolve(false);};$('[data-confirm]',dialog).onclick=()=>{dialog.close();resolve(true);};dialog.showModal();});dialog.remove();this.dialogs.delete(dialog);if(!confirmed){this.masterUpload=false;this.message('Upload cancelled. Existing documents are unchanged.');return;}
   const result=await this.request('/api/excel/import',{preview:pending.preview,completed:true,category:this.key,master:!!this.masterUpload,slot:this.key==='neft'?1:this.key==='worksheet'?2:3});this.masterUpload=false;this.resetDraft();this.id=result.id;this.preview=false;this.sheet=null;this.offset=0;this.query='';this.filter='';this.sort='';this.column='0';this.widths.clear();await xlRefresh();await this.expand(true,true);this.message('Completed file imported unchanged as an independent document.');
  }
- async save(){
-  if(!this.dirty())return;this.calcSequence++;clearTimeout(this.calcTimer);
+ async save(automatic=false){
+  clearTimeout(this.saveTimer);
+  if(automatic){
+   if(!this.dirty())return;
+   const snapshot=new Map(this.changes),result=await this.request('/api/excel/save',{id:this.id,revision:this.book.revision,changes:[...snapshot.values()]});
+   this.book.revision=result.revision;
+   for(const [key,patch] of snapshot){
+    if(patch.sheet===this.sheet)for(const row of this.grid.rows){const cell=row.cells.find(c=>c.address===patch.address);if(cell)cell.value=patch.value;}
+    this.baselines.set(key,{...patch});
+    if(this.changes.get(key)?.value===patch.value){this.changes.delete(key);this.touched.delete(key);}
+   }
+   this.root.querySelectorAll('.xl-modified').forEach(el=>{const input=el.querySelector('[data-cell]');if(input&&!this.changes.has(this.sheet+'!'+input.dataset.cell))el.classList.remove('xl-modified');});
+   if(!this.dirty()){this.message('Changes saved automatically.');$('.xl-file-state',this.root).textContent='Saved';}
+   if(result.worksheet_sync)await xlWorksheetSynced(this,result.worksheet_sync);
+   return;
+  }
+  if(!this.dirty()){this.message('Changes saved.');return;}this.calcSequence++;clearTimeout(this.calcTimer);
   const fields=[...this.root.querySelectorAll('[data-cell],[contenteditable="true"]')];
   const editable=fields.map(el=>el.getAttribute('contenteditable'));
   fields.forEach(el=>{if(el.matches('[data-cell]'))el.disabled=true;else el.contentEditable='false';});
   try{
    const payload={id:this.id,revision:this.book.revision};payload[this.format==='docx'?'paragraphs':'changes']=[...this.changes.values()];
-   await this.request('/api/excel/save',payload);this.resetDraft();await this.load();await xlRefresh();this.message('Changes saved.');
+   const result=await this.request('/api/excel/save',payload);this.resetDraft();await this.load();await xlRefresh();this.message('Changes saved.');if(result.worksheet_sync)await xlWorksheetSynced(this,result.worksheet_sync);
   }finally{fields.forEach((el,i)=>{el.disabled=false;if(editable[i]!==null)el.setAttribute('contenteditable',editable[i]);});}
  }
  async download(version){
@@ -172,8 +187,9 @@ class ExcelSection{
   if(action==='expand'){await this.expand(true);this.root.classList.toggle('xl-fullscreen');return;}
   if(action==='download'){await this.expand(true);if(this.preview)throw new Error('Create a new blank template or select a saved file first.');await this.download();return;}
   if(action==='newtab'){window.open('/?excel='+encodeURIComponent(this.id),'_blank','noopener');return;}
+  if(action==='retryworksheet'){if(this.dirty())await this.save();const r=await this.request('/api/excel/worksheet-sync',{id:this.id,revision:this.book.revision});await xlWorksheetSynced(this,r.worksheet_sync);return;}
   if(action==='save'){await this.save();return;}
-  if(action==='undo'||action==='redo'){const from=action==='undo'?this.undo:this.redo,to=action==='undo'?this.redo:this.undo,item=from.pop();if(!item)return;const value=action==='undo'?item.before:item.after;if(value)this.changes.set(item.key,value);else this.changes.delete(item.key);if(this.format==='xlsx')this.touched.set(item.key,value||this.baselines.get(item.key));to.push(item);if(this.format==='docx')this.drawDocument();else{this.drawTable();this.scheduleCalculation();}this.message(`${this.changes.size} unsaved changes`);return;}
+  if(action==='undo'||action==='redo'){const from=action==='undo'?this.undo:this.redo,to=action==='undo'?this.redo:this.undo,item=from.pop();if(!item)return;const value=action==='undo'?item.before:item.after;if(value)this.changes.set(item.key,value);else this.changes.delete(item.key);if(this.format==='xlsx')this.touched.set(item.key,value||this.baselines.get(item.key));to.push(item);if(this.format==='docx')this.drawDocument();else this.drawTable();this.edited();return;}
   if(action==='reset'){if(this.dirty()&&!confirm('Reset unsaved changes?'))return;this.resetDraft();await this.load();return;}
   if(action==='search'){this.query=$('.xl-search',this.root).value;this.column=$('.xl-column',this.root).value;this.filter=$('.xl-filter',this.root).value;this.offset=0;this.selection=null;await this.loadGrid();return;}
   if(action==='prev'||action==='next'){this.offset=Math.max(0,this.offset+(action==='next'?50:-50));this.selection=null;await this.loadGrid();return;}
