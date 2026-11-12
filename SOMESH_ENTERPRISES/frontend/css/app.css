@@ -106,13 +106,25 @@ td.bill { text-align: left; font-weight: 700; font-size: 13px; }
 /* dialog */
 dialog { border: 0; border-radius: 22px; background: var(--card); color: var(--fg); width: min(540px, calc(100vw - 32px)); padding: 24px; box-shadow: var(--shadow-hi); }
 dialog::backdrop { background: rgba(0,0,0,.35); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+/* Dialog form layout ("Give a task" dialogs on Assign and Pipeline). Columns are minmax(0,1fr) and every child has
+   min-width:0, so a field can never grow past its column; spacing comes only from the grid gaps (14px rows, 16px columns). */
+.dlg-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+.dlg-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; min-width: 0; }
+.dlg-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dlg-field > label.f { margin: 0; }
+.dlg-field > .in { display: block; width: 100%; min-width: 0; max-width: 100%; height: 44px; padding: 9px 12px; }
+.dlg-field > select.in { text-overflow: ellipsis; }
+.dlg-check { display: flex; align-items: center; gap: 9px; min-height: 24px; margin: 0; font-size: 13px; }
+.dlg-check input { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--blue); }
+.dlg-row > .dlg-check { align-self: end; min-height: 44px; }
+@media (max-width: 480px) { .dlg-row { grid-template-columns: minmax(0, 1fr); gap: 14px; } }
 label.f { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 6px; }
 .in { width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--card2); }
 .radios { display: flex; gap: 18px; }
 /* forms / admin */
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
 .panel h3 { margin: 0 0 4px; font-size: 18px; } .panel p { margin: 0 0 12px; }
-.row2 { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; } .row2 .in { flex: 1; min-width: 200px; }
+.row2 { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; } .row2 > .in { flex: 1; min-width: 200px; }
 .drop { display: block; border: 2px dashed var(--line); border-radius: 14px; padding: 18px; text-align: center; color: var(--muted); cursor: pointer; }
 .drop.over { border-color: var(--blue); background: var(--blue-soft); color: var(--blue); }
 .msg { border-radius: 12px; padding: 10px 14px; font-size: 13px; margin-top: 10px; }
@@ -362,7 +374,9 @@ th[aria-sort="ascending"] .arr, th[aria-sort="descending"] .arr { color: var(--b
 .asg-tick { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 12px; font-weight: 800; display: grid; place-items: center; }
 /* while dragging: every target shows a dashed outline, the one under the pointer lights up */
 body.asg-dragging .asg-target { outline: 2px dashed rgba(0,113,227,.4); outline-offset: -3px; }
-.asg-target.drop { background: var(--blue-soft); outline: 3px solid var(--blue) !important; outline-offset: -3px; transform: scale(1.02); }
+.asg-target.asg-over { background: var(--blue-soft); outline: 3px solid var(--blue) !important; outline-offset: -3px; transform: scale(1.02); }
+/* while a dialog is open the page behind is inert: no lifted/highlighted cards showing through the backdrop */
+body:has(dialog[open]) .asg-target { transform: none; transition: none; }
 /* the confirm dialog */
 .asg-tgts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .asg-tg { display: inline-flex; align-items: center; gap: 6px; background: var(--card2); border-radius: 980px; padding: 3px 10px 3px 3px; font-size: 13px; font-weight: 600; }

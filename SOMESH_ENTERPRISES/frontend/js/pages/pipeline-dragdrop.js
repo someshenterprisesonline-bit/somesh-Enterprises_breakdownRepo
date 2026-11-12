@@ -24,11 +24,13 @@ function giveTemplate(i, person) {
   const t = (S.tpls || [])[i]; if (!t) return;
   const u = S.meta.users.find(x => x.name === person) || {};
   dialog(`<h3 style="margin:0 0 4px">Give “${esc(t.name)}”</h3><p class="muted small" style="margin:6px 0;display:flex;gap:8px;align-items:center">${avatar(person)}<span><b>${esc(person)}</b> · ${esc(u.dept || "")}. They get the double beep straight away.</span></p>
-    ${t.about ? `<p class="small" style="margin:0 0 8px">${esc(t.about)}</p>` : ""}
-    <div class="row2"><span style="flex:1"><label class="f" for="gH">Time limit (hours)</label><input class="in" id="gH" name="hours" type="number" min="0.25" step="0.25" value="${t.hours}"></span>
-      <span style="flex:2"><label class="f" for="gC">Approver</label><select class="in" id="gC" name="checker">${S.meta.users.map(x => `<option ${x.name === S.user ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></span></div>
-    <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:12px"><input type="checkbox" name="docs" ${t.docs ? "checked" : ""} style="accent-color:#0071e3"> Needs documents after approval</label>
-    <label class="f" for="gN">Note for ${esc(person.split(" ").pop())} (optional)</label><input class="in" id="gN" name="output" placeholder="${esc(t.about || "")}">`,
+    ${t.about ? `<p class="small" style="margin:0 0 14px">${esc(t.about)}</p>` : ""}
+    <div class="dlg-fields">
+      <div class="dlg-row"><div class="dlg-field"><label class="f" for="gH">Time limit (hours)</label><input class="in" id="gH" name="hours" type="number" min="0.25" step="0.25" value="${t.hours}"></div>
+        <div class="dlg-field"><label class="f" for="gC">Approver</label><select class="in" id="gC" name="checker">${S.meta.users.map(x => `<option ${x.name === S.user ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div></div>
+      <label class="dlg-check"><input type="checkbox" name="docs" ${t.docs ? "checked" : ""}><span>Needs documents after approval</span></label>
+      <div class="dlg-field"><label class="f" for="gN">Note for ${esc(person.split(" ").pop())} (optional)</label><input class="in" id="gN" name="output" placeholder="${esc(t.about || "")}"></div>
+    </div>`,
     async (fd) => {
       try { const r = await api("/api/assign", { tasks: [{ title: t.name, who: person, checker: fd.get("checker"), hours: fd.get("hours"), docs: fd.get("docs") === "on", output: fd.get("output") || t.about || "" }] });
         note("Task given", `${r.codes[0]} ${t.name} → ${person}`, "approved"); S.selTpl = null; S.tt = await api(ttUrl()); render(); }

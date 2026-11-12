@@ -83,14 +83,18 @@ function asgGive(key, whos) {
   const t = asgTask(key); if (!t || !whos.length) return;
   const bills = (S.adhoc && S.adhoc.bills) || [];
   const tgt = whos.map(w => w.startsWith("dept:") ? `<span class="chip">Anyone in ${esc(w.slice(5))}</span>` : `<span class="asg-tg">${avatar(w)}${esc(w)}</span>`).join("");
+  hideTip();
   dialog(`<h3 style="margin:0 0 4px">${t.isNew ? "Give a new task" : `Give “${esc(t.title)}”`}</h3>
-    <div class="asg-tgts">${tgt}</div><p class="muted small" style="margin:4px 0 8px">${whos.length > 1 ? `${whos.length} copies, one each. ` : ""}They get the double beep straight away.${whos.some(w => w.startsWith("dept:")) ? " For a department, the first person to press Start takes it." : ""}</p>
-    ${t.isNew ? `<label class="f" for="asgT">What needs doing</label><input class="in" id="asgT" name="title" placeholder="Task title" autocomplete="off">` : `<input type="hidden" name="title" value="${esc(t.title)}">${t.about ? `<p class="small" style="margin:0 0 8px">${esc(t.about)}</p>` : ""}`}
-    <div class="row2"><span style="flex:1;min-width:120px"><label class="f" for="asgH">Time limit (hours)</label><input class="in" id="asgH" name="hours" type="number" min="0.25" step="0.25" value="${t.hours}"></span>
-      <span style="flex:2;min-width:160px"><label class="f" for="asgC">Approver</label><select class="in" id="asgC" name="checker">${S.meta.users.map(x => `<option ${x.name === S.user ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></span></div>
-    <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:12px"><input type="checkbox" name="docs" ${t.docs ? "checked" : ""} style="accent-color:#0071e3"> Needs documents after approval</label>
-    <label class="f" for="asgB">Bill (optional)</label><select class="in" id="asgB" name="bill"><option value="">No bill</option>${bills.map(b => `<option value="${esc(b.id)}">${esc(b.id)} · ${esc(b.client)}</option>`).join("")}</select>
-    <label class="f" for="asgN">Note (optional)</label><input class="in" id="asgN" name="output" value="${esc(t.isNew ? "" : t.about)}" placeholder="What to deliver">`,
+    <div class="asg-tgts">${tgt}</div><p class="muted small" style="margin:4px 0 14px">${whos.length > 1 ? `${whos.length} copies, one each. ` : ""}They get the double beep straight away.${whos.some(w => w.startsWith("dept:")) ? " For a department, the first person to press Start takes it." : ""}</p>
+    ${t.isNew ? "" : `<input type="hidden" name="title" value="${esc(t.title)}">${t.about ? `<p class="small" style="margin:0 0 14px">${esc(t.about)}</p>` : ""}`}
+    <div class="dlg-fields">
+      ${t.isNew ? `<div class="dlg-field"><label class="f" for="asgT">What needs doing</label><input class="in" id="asgT" name="title" placeholder="Task title" autocomplete="off"></div>` : ""}
+      <div class="dlg-row"><div class="dlg-field"><label class="f" for="asgH">Time limit (hours)</label><input class="in" id="asgH" name="hours" type="number" min="0.25" step="0.25" value="${t.hours}"></div>
+        <div class="dlg-field"><label class="f" for="asgC">Approver</label><select class="in" id="asgC" name="checker">${S.meta.users.map(x => `<option ${x.name === S.user ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div></div>
+      <label class="dlg-check"><input type="checkbox" name="docs" ${t.docs ? "checked" : ""}><span>Needs documents after approval</span></label>
+      <div class="dlg-field"><label class="f" for="asgB">Bill (optional)</label><select class="in" id="asgB" name="bill"><option value="">No bill</option>${bills.map(b => `<option value="${esc(b.id)}">${esc(b.id)} · ${esc(b.client)}</option>`).join("")}</select></div>
+      <div class="dlg-field"><label class="f" for="asgN">Note (optional)</label><input class="in" id="asgN" name="output" value="${esc(t.isNew ? "" : t.about)}" placeholder="What to deliver"></div>
+    </div>`,
     async (fd) => {
       const title = String(fd.get("title") || "").trim(); if (!title) return note("Nothing to give", "Type what needs doing.");
       const row = { title, checker: fd.get("checker"), hours: fd.get("hours"), docs: fd.get("docs") === "on", bill: fd.get("bill") || "", output: String(fd.get("output") || "").trim() };
@@ -104,11 +108,11 @@ function asgGive(key, whos) {
     });
 }
 function asgNewDraft() {   // "＋ New task": a small form, then the task waits at the top of the list as a draggable card
-  dialog(`<h3 style="margin:0 0 8px">New task</h3><p class="muted small" style="margin:0 0 6px">It appears at the top of “Tasks to give”. Then drag it onto someone, or tap a person.</p>
-    <label class="f" for="nwT">What needs doing</label><input class="in" id="nwT" name="title" placeholder="Task title" autocomplete="off">
-    <div class="row2"><span style="flex:1"><label class="f" for="nwH">Time limit (hours)</label><input class="in" id="nwH" name="hours" type="number" min="0.25" step="0.25" value="4"></span>
-      <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:30px;flex:1"><input type="checkbox" name="docs" style="accent-color:#0071e3"> Needs documents</label></div>
-    <label class="f" for="nwN">Note (optional)</label><input class="in" id="nwN" name="output" placeholder="What to deliver">`,
+  dialog(`<h3 style="margin:0 0 8px">New task</h3><p class="muted small" style="margin:0 0 14px">It appears at the top of “Tasks to give”. Then drag it onto someone, or tap a person.</p>
+    <div class="dlg-fields"><div class="dlg-field"><label class="f" for="nwT">What needs doing</label><input class="in" id="nwT" name="title" placeholder="Task title" autocomplete="off"></div>
+      <div class="dlg-row"><div class="dlg-field"><label class="f" for="nwH">Time limit (hours)</label><input class="in" id="nwH" name="hours" type="number" min="0.25" step="0.25" value="4"></div>
+        <label class="dlg-check"><input type="checkbox" name="docs"><span>Needs documents</span></label></div>
+      <div class="dlg-field"><label class="f" for="nwN">Note (optional)</label><input class="in" id="nwN" name="output" placeholder="What to deliver"></div></div>`,
     (fd) => { const title = String(fd.get("title") || "").trim(); if (!title) return note("Nothing added", "Type what needs doing.");
       const k = Date.now(); S.asgDrafts = [{ k, title, hours: Number(fd.get("hours")) || 4, docs: fd.get("docs") === "on", output: String(fd.get("output") || "").trim() }].concat(S.asgDrafts || []);
       S.asgSel = "draft:" + k; render(); });
@@ -121,12 +125,15 @@ function asgFilterGiven() {   // search filters the cards in place, so typing ne
 }
 function wireAssign() {
   const app = $("#app"); S.asgMulti = S.asgMulti || [];
-  const clearDrag = () => { document.body.classList.remove("asg-dragging"); app.querySelectorAll(".asg-target.drop").forEach(x => x.classList.remove("drop")); };
+  const clearDrag = () => {   // end every trace of a drag: dashed outlines, the lit-up target, the tooltip, any text selection
+    document.body.classList.remove("asg-dragging"); document.querySelectorAll(".asg-target.asg-over").forEach(x => x.classList.remove("asg-over"));
+    hideTip(); const s = getSelection(); if (s && s.rangeCount) s.removeAllRanges(); };
   const targetsFor = (who) => S.asgMulti.length ? [...new Set(S.asgMulti.concat(who ? [who] : []))] : [who];
   // task cards: drag, or click to select (Enter/Space too)
   app.querySelectorAll("[data-asgtask]").forEach(el => { const key = el.dataset.asgtask, m = /^tpl:(\d+)$/.exec(key);
     if (m) { const fake = { dataset: { tpl: m[1] }, getBoundingClientRect: () => el.getBoundingClientRect() };
-      el.onmouseenter = el.onfocus = () => tplTip(fake); el.onmouseleave = el.onblur = hideTip; }
+      // keyboard focus shows the tip; the focus a closing dialog hands back to this card (after a mouse drag) does not
+      el.onmouseenter = () => tplTip(fake); el.onfocus = () => { if (el.matches(":focus-visible")) tplTip(fake); }; el.onmouseleave = el.onblur = hideTip; }
     el.ondragstart = (e) => { hideTip(); e.dataTransfer.setData("text/plain", "asg:" + key); e.dataTransfer.effectAllowed = "copy"; document.body.classList.add("asg-dragging"); };
     el.ondragend = clearDrag;
     el.onclick = () => { hideTip();
@@ -136,9 +143,12 @@ function wireAssign() {
   });
   // people and department cards: drop targets, click to give / Ctrl+click to pick several
   app.querySelectorAll("[data-asgwho]").forEach(el => { const who = el.dataset.asgwho;
-    el.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; el.classList.add("drop"); };
-    el.ondragleave = (e) => { if (!el.contains(e.relatedTarget)) el.classList.remove("drop"); };
-    el.ondrop = (e) => { e.preventDefault(); clearDrag(); const v = e.dataTransfer.getData("text/plain"); if (v.startsWith("asg:")) asgGive(v.slice(4), targetsFor(who)); };
+    el.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; el.classList.add("asg-over"); };
+    el.ondragleave = (e) => { if (!el.contains(e.relatedTarget)) el.classList.remove("asg-over"); };
+    // Read the data and clear the highlight inside the drop event, then open the dialog on the next frame, after the
+    // browser has finished the drag (drag image gone, dragend delivered) and painted the cleared page.
+    el.ondrop = (e) => { e.preventDefault(); const v = e.dataTransfer.getData("text/plain"); clearDrag();
+      if (v.startsWith("asg:")) { const whos = targetsFor(who); requestAnimationFrame(() => { clearDrag(); asgGive(v.slice(4), whos); }); } };
     el.onclick = (e) => {
       if (e.ctrlKey || e.metaKey || S.asgPick) { S.asgMulti = S.asgMulti.includes(who) ? S.asgMulti.filter(x => x !== who) : S.asgMulti.concat(who); return render(); }
       if (S.asgSel) return asgGive(S.asgSel, targetsFor(who));

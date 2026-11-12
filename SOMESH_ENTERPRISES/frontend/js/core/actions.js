@@ -10,6 +10,11 @@ function dialog(html, onOk) {
   const d = $("#dlg"), f = $("#dlgForm");
   f.innerHTML = html + `<div class="actions" style="margin-top:20px;justify-content:flex-end"><button class="btn" value="cancel" type="submit" formnovalidate>Cancel</button><button class="btn primary" value="ok" type="submit">Confirm</button></div>`;
   const uh = $("#useHand"); if (uh) uh.onclick = () => { const t = ALL().find(x => x.id === S.dlgTask); if (t) { $("#link").value = handoffPath(t); $("#link").focus(); } };
+  // Enter in a text field means Confirm. Without this the browser's implicit submission uses the FIRST submit button
+  // (Cancel), so Enter silently discarded the dialog. requestSubmit keeps the fields' validation (min, required).
+  f.onkeydown = (e) => { const el = e.target, ok = f.querySelector('button[value="ok"]');
+    if (e.key !== "Enter" || e.isComposing || !ok || el.tagName !== "INPUT" || /^(checkbox|radio|button|submit|reset|file)$/.test(el.type)) return;
+    e.preventDefault(); f.requestSubmit(ok); };
   d.onclose = () => { if (d.returnValue === "ok") onOk(new FormData(f)); };
   d.returnValue = ""; d.showModal();
 }
