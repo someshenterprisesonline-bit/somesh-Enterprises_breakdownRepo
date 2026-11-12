@@ -58,7 +58,19 @@ Employee PC (Chrome) ──https://ADMIN-IP:8443 or http://ADMIN-IP:8080──�
 
 ### Employee PCs
 
-Copy `certs\employee-pc-kit\` (USB or a shared folder) to each employee PC and double-click **`OPEN SOMESH ENTERPRISES (Employee PC).bat`** inside it. The first time, it installs `office-ca.crt` for that Windows user (click **Yes** if Windows asks). It then checks the server is reachable and opens Chrome at the saved address. It never starts a server or database. Without the kit, open Chrome at the address shown in the SERVER MODE window and bookmark it. The CA certificate can also be downloaded from `http://ADMIN-IP:8080/office-ca.crt`; install it with `certutil -user -addstore Root office-ca.crt`.
+Each employee needs only Google Chrome and the **Employee PC Kit**: no Git clone, Python, MySQL, Node.js or database. Everyone works in the one shared database on the Admin PC, so changes (tasks, statuses, alerts, employee details, Excel Workspace versions) appear on every signed-in PC within a second, with nothing to update or sync by hand.
+
+**Admin, once (and after the Admin PC's address changes):** `python tools\make_office_cert.py --kit-only --url https://192.168.1.4:8443` rebuilds `certs\employee-pc-kit\` and `certs\employee-pc-kit.zip` from the existing office CA. The kit has exactly three files: the launcher, `office-ca.crt` (public certificate only) and `somesh-server-url.txt`. The tool pins the office CA's SHA-256 fingerprint inside the kit's launcher and prints it. The kit never contains a private key, the database or settings.
+
+**Employee, every day:**
+
+1. Copy the kit folder (or unzip `employee-pc-kit.zip`) to the employee PC, for example to the Desktop.
+2. Double-click **`OPEN SOMESH ENTERPRISES (Employee PC).bat`**.
+3. **First time only:** if this Windows user does not trust the office certificate yet, the launcher checks that `office-ca.crt` is exactly the office CA (its fingerprint must match the one pinned in the kit), shows the name and SHA-256 fingerprint and asks **Install the office certificate now? [Y/N]**. Press **Y**, then click **Yes** in the Windows Security Warning. A certificate that does not match is never installed. A launcher without a pinned fingerprint (the plain repository copy) never installs one.
+4. The launcher checks that the Admin PC answers at `https://192.168.1.4:8443`, with full certificate checking. If the server cannot be reached it explains why (server window closed, not on the office network, certificate not trusted, or PC not allowed) and offers **[R] Try again, [O] Open Chrome anyway, [Q] Quit**.
+5. Chrome opens the shared app. Choose your name on the sign-in screen. Admins also enter their PIN.
+
+Without the kit, open Chrome at the address shown in the SERVER MODE window and bookmark it. HTTPS then needs the CA installed by hand: download `http://ADMIN-IP:8080/office-ca.crt`, compare its SHA-256 fingerprint with the one `make_office_cert.py` printed, then run `certutil -user -addstore Root office-ca.crt`.
 
 Once every employee PC trusts the office CA, set `network.https.redirect_lan_http` to `true` in `backend\config.json` (app stopped) so other PCs are always sent from `http://…:8080` to HTTPS. `http://localhost:8080` on the Admin PC keeps working.
 
@@ -203,7 +215,7 @@ $env:PLAYWRIGHT_MODULE_PATH = 'C:\path\to\test-tools\node_modules\playwright'
 python tests/run_browser.py
 ```
 
-Shared-host checks: `python -m unittest tests.test_lan_sharing` (network allowlist, cross-site POSTs, sessions, sequenced/targeted live notices, HTTPS, backup/restore) and `python tests/run_browser.py --lan` (four separate Chrome sessions: live task assignment and start, admin settings, reconnection after an outage, Excel version sync and stale-save rejection).
+Shared-host checks: `python -m unittest tests.test_lan_sharing` (network allowlist, cross-site POSTs, sessions, sequenced/targeted live notices, HTTPS, backup/restore) and `python tests/run_browser.py --lan` (four separate Chrome sessions: live task assignment and start, admin settings, reconnection after an outage, Excel version sync and stale-save rejection). `python tests/run_browser.py --multi-user` uses separate Chrome sessions for an Admin, Employee A and Employee B on one server. It checks that A gets the assigned task live, that B cannot see, start or approve it, that admin-only APIs return 403 for employees and that a missing or forged session gets 401, that A's start and submit reach the approver live, that a refresh keeps the data, and that employee-detail edits reach other sessions. `python -m unittest tests.test_employee_launcher` runs the real Employee PC launcher on Windows in test mode (`SOMESH_LAUNCHER_TEST=1`: no Chrome, every prompt answered No). It covers a reachable server, an unreachable server, a bad address, a wrong certificate that is never installed, a launcher without a pin, and a kit that holds no secrets.
 
 The runner starts a synthetic app on a free loopback port and closes it afterward. Set `BROWSER_CHANNEL` for another installed channel; on other platforms install Playwright's Chromium browser. No deployment PIN or installed database is used.
 

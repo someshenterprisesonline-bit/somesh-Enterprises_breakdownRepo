@@ -8,7 +8,10 @@ Writes into certs/ (excluded from Git):
   office-ca.crt   public CA certificate: install it once on each employee PC (also served at /office-ca.crt)
   office-ca.key   CA private key: never copy it off this PC. Re-running reuses it, so employee PCs do not need a new CA
   server.crt/.key HTTPS certificate for this PC's names and IP addresses (re-run after the IP address changes)
-  employee-pc-kit\\ office-ca.crt, the employee launcher and the server address, to copy to each employee PC
+  employee-pc-kit\\ office-ca.crt, the employee launcher (office CA SHA-256 fingerprint pinned inside it)
+                  and the server address, to copy to each employee PC. Never a key, database or settings file.
+
+    python tools/make_office_cert.py --kit-only [--url https://192.168.1.4:8443]   rebuild only the kit
 
 Needs the 'cryptography' package on the Admin PC only:  python -m pip install --user cryptography
 """
@@ -108,25 +111,75 @@ def default_hosts():
     return [name, name.lower(), 'localhost', '127.0.0.1'] + LAN.lan_ipv4()
 
 
+def ca_fingerprint(crt_path):
+    """SHA-256 of the CA certificate's DER bytes, upper-case hex (what the employee launcher compares)."""
+    import base64
+    import hashlib
+    import re
+    text = Path(crt_path).read_text(encoding='ascii')
+    m = re.search(r'-----BEGIN CERTIFICATE-----(.+?)-----END CERTIFICATE-----', text, re.S)
+    if not m:
+        raise ValueError(f'{crt_path} is not a PEM certificate')
+    return hashlib.sha256(base64.b64decode(''.join(m.group(1).split()))).hexdigest().upper()
+
+
+def write_kit(root, url, kit=None):
+    """Write the Employee PC Kit: office-ca.crt, the launcher with the CA fingerprint pinned, and the address.
+    Never copies a private key, the database or settings."""
+    root = Path(root)
+    kit = Path(kit) if kit else root / 'certs' / 'employee-pc-kit'
+    kit.mkdir(parents=True, exist_ok=True)
+    ca = root / 'certs' / 'office-ca.crt'
+    fingerprint = ca_fingerprint(ca)
+    shutil.copy2(ca, kit / 'office-ca.crt')
+    bat = (root / CLIENT_BAT).read_bytes().decode('ascii')
+    pin_line = 'set "CA_SHA256="'
+    if bat.count(pin_line) != 1:
+        raise ValueError(f'{CLIENT_BAT} has no single {pin_line} line to fill in')
+    bat = bat.replace(pin_line, f'set "CA_SHA256={fingerprint}"').replace('\r\n', '\n').replace('\n', '\r\n')
+    (kit / CLIENT_BAT).write_bytes(bat.encode('ascii'))
+    (kit / 'somesh-server-url.txt').write_text(url + '\n', encoding='ascii')
+    for stray in kit.iterdir():
+        if stray.suffix.lower() in ('.key', '.db', '.json', '.pem'):
+            stray.unlink()
+    import zipfile  # the same kit as one file, easy to send to each employee PC
+    with zipfile.ZipFile(kit.with_suffix('.zip'), 'w', zipfile.ZIP_DEFLATED) as z:
+        for name in (CLIENT_BAT, 'office-ca.crt', 'somesh-server-url.txt'):
+            z.write(kit / name, f'{kit.name}/{name}')
+    return kit, fingerprint
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--host', action='append', default=[], help='extra DNS name or IP address for the certificate')
     ap.add_argument('--enable', action='store_true', help='turn on the HTTPS listener in backend/config.json')
     ap.add_argument('--port', type=int, default=8443)
+    ap.add_argument('--kit-only', action='store_true',
+                    help='only rebuild certs/employee-pc-kit from the existing office CA (no new certificates)')
+    ap.add_argument('--url', help='employee address written into the kit, for example https://192.168.1.4:8443')
     a = ap.parse_args(argv)
+    if a.kit_only:
+        if not (ROOT / 'certs' / 'office-ca.crt').is_file():
+            print('No office CA yet (certs/office-ca.crt). Run this tool without --kit-only first.')
+            return 2
+        old = ROOT / 'certs' / 'employee-pc-kit' / 'somesh-server-url.txt'
+        ips = LAN.lan_ipv4()
+        url = a.url or (old.read_text(encoding='ascii').strip() if old.is_file() else
+                        f'https://{ips[0] if ips else socket.gethostname()}:{a.port}')
+        kit, fingerprint = write_kit(ROOT, url)
+        print('Employee PC kit rebuilt:', kit)
+        print('Address:', url)
+        print('Office CA SHA-256 fingerprint:', fingerprint)
+        return 0
     hosts = default_hosts() + a.host
     created, names = make(ROOT / 'certs', hosts)
     print(('Created' if created else 'Reused') + ' the office CA: certs/office-ca.crt')
     print('HTTPS certificate: certs/server.crt for ' + ', '.join(names))
     ips = LAN.lan_ipv4()
-    url = f'https://{ips[0]}:{a.port}' if ips else f'https://{socket.gethostname()}:{a.port}'
-    kit = ROOT / 'certs' / 'employee-pc-kit'
-    kit.mkdir(exist_ok=True)
-    shutil.copy2(ROOT / 'certs' / 'office-ca.crt', kit / 'office-ca.crt')
-    if (ROOT / CLIENT_BAT).is_file():
-        shutil.copy2(ROOT / CLIENT_BAT, kit / CLIENT_BAT)
-    (kit / 'somesh-server-url.txt').write_text(url + '\n', encoding='ascii')
+    url = a.url or (f'https://{ips[0]}:{a.port}' if ips else f'https://{socket.gethostname()}:{a.port}')
+    kit, fingerprint = write_kit(ROOT, url)
     print('Employee PC kit (copy this folder to each employee PC):', kit)
+    print('Office CA SHA-256 fingerprint (the employee launcher shows it before installing):', fingerprint)
     if a.enable:
         from restore_db import server_running  # noqa: E402  (same tools folder)
         if server_running(ROOT):

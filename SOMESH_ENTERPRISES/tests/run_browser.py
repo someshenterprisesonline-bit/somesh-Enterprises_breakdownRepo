@@ -49,9 +49,11 @@ def main():
                    TEST_FIXTURE_INFO=json.dumps(info), TEST_ARTIFACT_DIR=str(app.root))
         script = 'all-employees-excel.cjs' if '--all-employees' in sys.argv else ("excel-workspace.cjs" if "--excel" in sys.argv else ("action-center.cjs" if "--action-center" in sys.argv else "browser.cjs"))
         if "--employees" in sys.argv: script = "employees.cjs"
+        if "--assign-dialog" in sys.argv: script = "assign-dialog.cjs"
         if "--themes" in sys.argv: script = "theme-baseline.cjs" if os.environ.get("THEME_BASELINE") else "themes.cjs"
         if '--neft' in sys.argv: script = 'neft-sync.cjs'
         if '--lan' in sys.argv: script = 'lan-sync.cjs'
+        if '--multi-user' in sys.argv: script = 'multi-user.cjs'
         if '--formulas' in sys.argv: script = 'formula-engine.cjs'
         if '--improvements' in sys.argv: script = 'workspace-improvements.cjs'
         if '--critical' in sys.argv: script = 'critical-sync-profiles.cjs'
