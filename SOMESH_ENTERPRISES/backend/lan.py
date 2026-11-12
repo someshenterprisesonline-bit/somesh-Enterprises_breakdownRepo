@@ -114,7 +114,16 @@ def tls_context(cert, key):
     return ctx
 
 
-class TLSServer(ThreadingHTTPServer):
+class OfficeHTTPServer(ThreadingHTTPServer):
+    """The app's HTTP listener. One page load opens ~30 connections at once (HTTP/1.0: one per script, API call and
+    the live stream). Python's default listen backlog of 5 made Windows refuse some of them whenever accept() fell
+    behind (a busy Excel sync, a slow PC), so a script such as utils.js never loaded and the page failed with
+    "syncClock is not defined". 128 queued connections absorb those bursts."""
+    request_queue_size = 128
+    daemon_threads = True
+
+
+class TLSServer(OfficeHTTPServer):
     """HTTPS listener. The TLS handshake runs in the per-connection thread so one slow client cannot block accept()."""
     daemon_threads = True
 

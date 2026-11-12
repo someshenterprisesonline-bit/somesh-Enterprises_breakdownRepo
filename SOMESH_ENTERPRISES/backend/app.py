@@ -22,6 +22,7 @@ import storage as ST
 import excel_workspace as EW
 import shutil, secrets, math, gzip, ssl
 import lan as LAN
+ThreadingHTTPServer = LAN.OfficeHTTPServer   # larger listen backlog; see lan.OfficeHTTPServer
 import runtime_storage as RUNTIME
 
 BASE = os.path.dirname(os.path.abspath(__file__))          # backend/  (code + config.json, users.json, workflow.json)
@@ -722,6 +723,11 @@ def tracker_xlsx(day):
 # ------------------------------------------------------------------ workflow engine
 class FlowError(Exception):
     pass
+
+def flow_details(e):
+    """Structured field details (for example an invalid IFSC cell) sent with a 400 so the page can show the right dialog."""
+    v = getattr(e, "validation", None)
+    return {"validation": v} if v else {}
 
 def get_task(tid):
     r = q("SELECT * FROM tasks WHERE id=?", (tid,))
@@ -2013,7 +2019,7 @@ class H(BaseHTTPRequestHandler):
         try: return self.get(u, qs)
         except NeedLogin: return self.send_json({"error": "Please sign in again", "login": True}, 401)
         except Denied as e: return self.send_json({"error": str(e)}, 403)
-        except FlowError as e: return self.send_json({"error": str(e)}, 400)
+        except FlowError as e: return self.send_json({"error": str(e), **flow_details(e)}, 400)
         except (BrokenPipeError, ConnectionResetError): pass
         except Exception as e:
             print("error:", repr(e)); self.send_json({"error": "Server error: " + str(e)}, 500)
@@ -2358,7 +2364,7 @@ class H(BaseHTTPRequestHandler):
         except Denied as e:
             self.send_json({"ok": False, "error": str(e)}, 403)
         except (FlowError, WI.InputError) as e:
-            self.send_json({"ok": False, "error": str(e)}, 400)
+            self.send_json({"ok": False, "error": str(e), **flow_details(e)}, 400)
         except Exception as e:
             print("error:", repr(e)); self.send_json({"ok": False, "error": "Server error: " + str(e)}, 500)
 

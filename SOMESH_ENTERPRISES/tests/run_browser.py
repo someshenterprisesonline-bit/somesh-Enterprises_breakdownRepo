@@ -12,12 +12,12 @@ def main():
     app = AppFixture()
     try:
         info = app.seed_browser()
-        if "--critical" in sys.argv or "--improvements" in sys.argv or "--formulas" in sys.argv or "--excel" in sys.argv or '--all-employees' in sys.argv or "--themes" in sys.argv:
+        if "--critical" in sys.argv or "--improvements" in sys.argv or "--improvements-slow" in sys.argv or "--formulas" in sys.argv or "--excel" in sys.argv or '--all-employees' in sys.argv or "--themes" in sys.argv:
             from test_excel_workspace import sample
             from test_document_workspace import seed_documents
             from test_formula_engine import template, payload
             from test_neft_sync import neft_file
-            info['excel'] = seed_documents(app, actual=bool(os.environ.get('EXCEL_REFERENCE_ROOT')),assign='--all-employees' not in sys.argv and '--improvements' not in sys.argv and '--critical' not in sys.argv,worksheet_data=payload(template()) if '--formulas' in sys.argv or '--improvements' in sys.argv or '--critical' in sys.argv else None,neft_data=neft_file() if '--improvements' in sys.argv or '--critical' in sys.argv else None)
+            info['excel'] = seed_documents(app, actual=bool(os.environ.get('EXCEL_REFERENCE_ROOT')),assign='--all-employees' not in sys.argv and '--improvements' not in sys.argv and '--improvements-slow' not in sys.argv and '--critical' not in sys.argv,worksheet_data=payload(template()) if '--formulas' in sys.argv or '--improvements' in sys.argv or '--improvements-slow' in sys.argv or '--critical' in sys.argv else None,neft_data=neft_file() if '--improvements' in sys.argv or '--improvements-slow' in sys.argv or '--critical' in sys.argv else None)
             from test_document_workspace import letter_sample
             letter = app.root / 'letter.docx'
             letter.write_bytes(letter_sample())
@@ -28,7 +28,7 @@ def main():
             completed=app.root/'completed.xlsx'
             completed.write_bytes(sample())
             info['excel']['completed_upload']=str(completed)
-        if '--neft' in sys.argv:
+        if '--neft' in sys.argv or '--bank' in sys.argv:
             import base64
             from test_neft_sync import neft_file, worksheet_file
             from test_excel_workspace import add_employees
@@ -54,8 +54,10 @@ def main():
         if '--neft' in sys.argv: script = 'neft-sync.cjs'
         if '--lan' in sys.argv: script = 'lan-sync.cjs'
         if '--multi-user' in sys.argv: script = 'multi-user.cjs'
+        if '--bank' in sys.argv: script = 'bank-fields.cjs'
         if '--formulas' in sys.argv: script = 'formula-engine.cjs'
         if '--improvements' in sys.argv: script = 'workspace-improvements.cjs'
+        if '--improvements-slow' in sys.argv: script = 'workspace-improvements.cjs'; env['TEST_SLOW_LIBRARY_MS'] = '1500'
         if '--critical' in sys.argv: script = 'critical-sync-profiles.cjs'
         result = subprocess.call(["node", str(PROJECT / "tests" / script)], env=env)
         if result==0 and '--critical' in sys.argv:
@@ -82,6 +84,12 @@ def main():
             evidence.mkdir(parents=True, exist_ok=True)
             for file in app.root.glob('neft-*.png'): shutil.copy2(file, evidence / file.name)
             print('PASS reopening both browser downloads: identical employee order and preserved formulas; screenshot in', evidence)
+        if result == 0 and '--bank' in sys.argv:
+            import shutil
+            evidence = PROJECT / 'data' / 'bank-fields-audit'
+            evidence.mkdir(parents=True, exist_ok=True)
+            for file in app.root.glob('bank-*.png'): shutil.copy2(file, evidence / file.name)
+            print('Bank field screenshots:', evidence)
         if result == 0 and '--excel' in sys.argv:
             import openpyxl
             import word_workspace as WORD

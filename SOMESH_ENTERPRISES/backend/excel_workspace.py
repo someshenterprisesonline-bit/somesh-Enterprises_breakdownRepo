@@ -14,12 +14,13 @@ import zipfile
 import excel_calculation as CALC
 import word_workspace as WORD
 import neft_sync as NS
+import bank_fields as BANK
 from datetime import datetime, date, time
 from decimal import Decimal, InvalidOperation
 
 import openpyxl
 from openpyxl.cell.cell import MergedCell
-from openpyxl.utils import get_column_letter, range_boundaries
+from openpyxl.utils import get_column_letter, range_boundaries, column_index_from_string
 from openpyxl.workbook.properties import CalcProperties
 from openpyxl.formula.tokenizer import Tokenizer
 from openpyxl.formula.translate import Translator
@@ -58,6 +59,71 @@ def init(g):
 
 def fail(g, message):
     raise g['FlowError'](message)
+
+
+def fail_validation(g, problem, message=None):
+    """A field validation error: the browser shows the VALIDATION ERROR dialog and focuses problem['address']."""
+    error = g['FlowError'](message or problem['message'])
+    error.validation = problem
+    raise error
+
+
+def bank_kinds(s, info=None):
+    info = info or layout(s)
+    return BANK.column_kinds(info['header_rows'], s.max_column)
+
+
+def check_bank_upload(g, w):
+    """Refuse an upload with invalid IFSC codes or account numbers Excel already rounded; nothing is stored."""
+    problems = []
+    for s in w:
+        info = layout(s); kinds = bank_kinds(s, info)
+        if kinds:
+            problems += BANK.scan(s, kinds, info['header_end'] + 1, s.max_row)
+    if problems:
+        main = next((p for p in problems if p['field'] == 'ifsc'), problems[0])
+        fail_validation(g, {**main, 'upload': True, 'count': len(problems), 'problems': problems[:50]},
+                        main['message'] + ' The file was not uploaded. Check ' + BANK.describe(problems) + '.')
+
+
+def stable_zip(data, reference):
+    """Same content -> same bytes. Regenerated downloads otherwise carry the current time in every ZIP entry
+    (2-second resolution) and in docProps/core.xml (modified time), so two downloads of an unchanged document
+    could differ. Entry timestamps and the document properties are taken from the stored file; every other part
+    and the compression are unchanged."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(reference)) as ref:
+            stamps = {i.filename: i.date_time for i in ref.infolist()}
+            core = ref.read('docProps/core.xml') if 'docProps/core.xml' in stamps else None
+        default = next(iter(stamps.values()), (1980, 1, 1, 0, 0, 0))
+        out = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(data)) as src, zipfile.ZipFile(out, 'w') as dst:
+            for info in src.infolist():
+                item = zipfile.ZipInfo(info.filename, stamps.get(info.filename, default))
+                item.compress_type = info.compress_type; item.external_attr = info.external_attr
+                dst.writestr(item, core if info.filename == 'docProps/core.xml' and core is not None else src.read(info.filename))
+        return out.getvalue()
+    except zipfile.BadZipFile:
+        return data
+
+
+def text_accounts(g, data):
+    """Download copy where every exact numeric account number is a Text cell, so Excel never shows 1.23457E+15."""
+    w = read(data, g); changed = False
+    for s in w:
+        info = layout(s)
+        for col, kind in bank_kinds(s, info).items():
+            if kind != 'account':
+                continue
+            for row in range(info['header_end'] + 1, s.max_row + 1):
+                c = s.cell(row, col)
+                if isinstance(c, MergedCell) or c.data_type == 'f' or isinstance(c.value, bool) or not isinstance(c.value, (int, float)):
+                    continue
+                text, problem = BANK.account_text(c.value)
+                if problem:
+                    continue  # digits already lost in Excel: keep the stored value, never invent digits
+                c.value = text; c.data_type = 's'; c.number_format = '@'; changed = True
+    return NS.serialize(w, data) if changed else data
 
 
 def allowed_employee(g, actor):
@@ -359,12 +425,16 @@ def _get(g, actor, path, qs):
         b = template_book(g,actor,bid) if template and path.endswith(('/metadata','/sheet','/document')) else book(g, actor, bid, 'download' if path.endswith('/download') else 'view')
         if path.endswith('/download'):
             extension=b.get('format') or 'xlsx'
-            download_data = data_for(g, b, int(arg('version', '0')) or None)
+            download_data = stored_data = data_for(g, b, int(arg('version', '0')) or None)
             if b.get('origin')=='blank' and extension=='xlsx' and not int(arg('version','0')):
                 manual=read(download_data,g);repair_manual_start(g,b,manual)
                 download_data=NS.serialize(manual,download_data,calculations=CALC.Calculator(manual).results())
             if category(b) == 'neft' and not b['master'] and not int(arg('version', '0')):
                 download_data = NS.export(g, b, download_data)
+            if extension == 'xlsx':
+                download_data = text_accounts(g, download_data)
+            if download_data is not stored_data:
+                download_data = stable_zip(download_data, stored_data)
             return (download_data, filename(arg('filename',b['name']),extension), 'application/vnd.openxmlformats-officedocument.'+('wordprocessingml.document' if extension=='docx' else 'spreadsheetml.sheet'))
         if path.endswith('/history'):
             return {'versions': [dict(r) for r in g['DB'].execute('SELECT revision,actor,stamp,changes FROM ew_versions WHERE book=? ORDER BY revision DESC', (bid,))]}
@@ -419,6 +489,20 @@ def _get(g, actor, path, qs):
             for row in result['rows']:
                 for c in row['cells']:
                     if c['formula']:c['display']=CALC.display(c['value'],c['format'])
+            kinds = bank_kinds(s, info)
+            result['bank_fields'] = {str(col): kind for col, kind in kinds.items()}
+            for row in result['rows']:
+                for c in row['cells']:
+                    kind = kinds.get(column_index_from_string(re.match(r'[A-Z]+', c['address'])[0]))
+                    if not kind:
+                        continue
+                    c['type'] = 's'
+                    if kind == 'account' and c['value'] != '':
+                        raw = cached.get((s.title, c['address']), c['value']) if c['formula'] else s[c['address']].value
+                        text, problem = BANK.account_text(raw)
+                        c['value'] = text
+                        if c['formula']: c['display'] = text
+                        if problem: c['warning'] = problem['message']
             return result
         fail(g, 'Unknown Excel API.')
 
@@ -607,7 +691,7 @@ def _post(g, actor, path, body):
                     fail(g, 'Invalid upload encoding.')
                 word=name.lower().endswith('.docx')
                 if word:WORD.read(data)
-                else:w = read(data, g)
+                else:w = read(data, g); check_bank_upload(g, w)
                 pid = uuid.uuid4().hex
                 db.execute("DELETE FROM ew_pending WHERE stamp < datetime('now','-1 day')")
                 if db.execute('SELECT COUNT(*) FROM ew_pending WHERE actor=?', (actor,)).fetchone()[0] >= 10:
@@ -626,7 +710,7 @@ def _post(g, actor, path, body):
                 word=p['name'].lower().endswith('.docx')
                 if body.get('completed') or word:
                     if word:WORD.read(bytes(p['data']))
-                    else:read(bytes(p['data']),g)
+                    else:check_bank_upload(g, read(bytes(p['data']),g))
                     slot=int(body.get('slot') or 0) if body.get('master') else None
                     if body.get('master') and not admin:raise g['Denied']('Only admins upload master templates.')
                     if body.get('master') and slot not in (1,2,3):fail(g,'Choose a template slot.')
@@ -700,6 +784,7 @@ def _post(g, actor, path, body):
                 original_data=data_for(g,b)
                 w = read(original_data, g); schema=json.loads(b.get('schema_json') or '{}'); repair_manual_start(g,b,w,schema); changes = body.get('changes', []); operations = body.get('rows', [])
                 layouts={s.title:layout(s) for s in w}
+                saving=path.endswith('/save'); kinds_by_sheet={s.title:bank_kinds(s,layouts[s.title]) for s in w}; bank_rows=set()
                 if not isinstance(changes, list) or len(changes) > 10000 or not isinstance(operations, list) or len(operations) > 100:
                     fail(g, 'Save at most 10,000 cell edits and 100 row changes at once.')
                 for change in changes:
@@ -711,6 +796,14 @@ def _post(g, actor, path, body):
                     expected=schema.get(s.title,{}).get(c.coordinate)
                     headers=' '.join(str(row[c.column-1] or '') for row in layouts[s.title]['header_rows'])
                     kind='text' if re.search(r'account|ifsc|hsn|code',headers,re.I) else expected or change.get('type')
+                    bank=kinds_by_sheet[s.title].get(c.column)
+                    if bank and isinstance(change.get('value'),str) and not change['value'].startswith('='):
+                        change['value']=change['value'].strip()  # surrounding spaces only; characters are never cut
+                        if saving:
+                            problem=BANK.ifsc_problem(change['value']) if bank=='ifsc' else BANK.account_problem(change['value'])
+                            if problem:fail_validation(g,BANK.validation(bank,s.title,c.coordinate,problem,value=change['value']))
+                            if bank=='ifsc' and not change['value'] and str(c.value if c.value is not None else '').strip():
+                                bank_rows.add((s.title,c.row))  # an existing IFSC Code is being removed
                     value = typed_value(g, c, change.get('value'), kind, admin, b['formulas_unlocked'])
                     change['previous_value'] = str(c.value) if c.value is not None else ''
                     change['previous_type'] = c.data_type
@@ -725,6 +818,13 @@ def _post(g, actor, path, body):
                     c.value = value
                     if isinstance(value, str) and not value.startswith('='):
                         c.data_type = 's'
+                        if bank: c.number_format = '@'  # bank identifiers stay text in Excel too
+                for title,row in sorted(bank_rows):  # a row with an account number cannot lose its IFSC Code (rows still being filled in may save without one)
+                    kinds=kinds_by_sheet[title];ifsc=[k for k,v in kinds.items() if v=='ifsc'];account=[k for k,v in kinds.items() if v=='account']
+                    if len(ifsc)!=1 or len(account)!=1:continue
+                    a=w[title].cell(row,account[0]);i=w[title].cell(row,ifsc[0])
+                    if a.data_type!='f' and i.data_type!='f' and str(a.value if a.value is not None else '').strip() and not str(i.value if i.value is not None else '').strip():
+                        fail_validation(g,BANK.validation('ifsc',title,i.coordinate,{'message':BANK.IFSC_REQUIRED,'length':0,'required':True}))
                 for op in operations:
                     if op.get('sheet') not in w.sheetnames:
                         fail(g, 'Unknown worksheet.')

@@ -37,13 +37,13 @@ class ReverseTests(unittest.TestCase):
         state=r['worksheet_sync'];self.assertEqual(state['status'],'synced',state);self.assertEqual(state['records'],2);neft=state['neft']
         rows=list(self.book(neft)['NEFT'].iter_rows(min_row=2));self.assertEqual([r[1].value for r in rows[:2]],['wqe','ew'])
         self.assertAlmostEqual(rows[0][7].value,1590.75);self.assertAlmostEqual(rows[1][7].value,618.3515625)
-        status,r=self.save(neft,[{'sheet':'NEFT','address':c+'2','value':v,'type':'text'} for c,v in {'D':'Bank','E':'001234567','F':'Branch','G':'IFSC','I':'Keep remark'}.items()]);self.assertEqual(status,200,r)
+        status,r=self.save(neft,[{'sheet':'NEFT','address':c+'2','value':v,'type':'text'} for c,v in {'D':'Bank','E':'001234567','F':'Branch','G':'SBIN0001234','I':'Keep remark'}.items()]);self.assertEqual(status,200,r)
         self.assertEqual(self.book(bid)['TNOU']['D7'].value,2323)
         self.enter(bid,[(7,'wqe','Manager',4000,2323,23,21)])
         for direction in ('asc','desc'):
             status,r=self.sort(neft,2,direction);self.assertEqual(status,200,r)
             row=next(r for r in self.book(neft)['NEFT'].iter_rows(min_row=2) if r[1].value=='wqe')
-            self.assertEqual([c.value for c in row[3:7]],['Bank','001234567','Branch','IFSC']);self.assertEqual(row[8].value,'Keep remark');self.assertEqual(row[2].value,'Manager');self.assertEqual(row[9].value,'=H'+str(row[0].row)+'*2')
+            self.assertEqual([c.value for c in row[3:7]],['Bank','001234567','Branch','SBIN0001234']);self.assertEqual(row[8].value,'Keep remark');self.assertEqual(row[2].value,'Manager');self.assertEqual(row[9].value,'=H'+str(row[0].row)+'*2')
         ws=self.book(bid)['TNOU'];position=next(r for r in range(7,9) if ws.cell(r,2).value=='wqe')
         state=self.enter(bid,[(position,'wqe','Manager',5000,2323,23,21)])['worksheet_sync'];self.assertEqual(state['status'],'synced',state)
         self.assertEqual(self.book(bid)['TNOU']['D8' if self.book(bid)['TNOU']['B8'].value=='wqe' else 'D7'].value,5000)

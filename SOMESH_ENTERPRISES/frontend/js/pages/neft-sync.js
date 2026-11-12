@@ -73,7 +73,9 @@ const NeftSync = {
     if (target.preview && !target.dirty()) { target.id=state.target; target.preview=false; target.sheet=null; target.grid=null; target.options(); }
     if (target.id !== state.target || state.status !== 'synced') return;
     if (target.open && (target.book?.id !== state.target || target.book?.revision !== state.target_revision || !target.grid)) {
-      await target.run(async()=>{
+      // Queue the Worksheet reload; do not wait for it. This runs inside the NEFT panel's queue, and a Worksheet save
+      // running at the same moment waits for the NEFT queue (xlWorksheetSynced): awaiting here deadlocked both panels.
+      target.run(async()=>{
         if (target.dirty()) await this.rebaseDraft(target);
         else await target.load();
       });
@@ -106,7 +108,12 @@ const NeftSync = {
   async save(p, automatic=false) {
     clearTimeout(p.neftSaveTimer);clearTimeout(p.calcTimer);p.calcSequence++;
     if (!p.dirty()) {if(!automatic)p.message('Changes saved.');return;}
-    const snapshot=new Map(p.changes);this.status(p,'Saving NEFT and synchronizing Worksheet…');
+    // IFSC / account number checks: Save Changes shows the VALIDATION ERROR dialog; autosave quietly keeps invalid or
+    // incomplete bank cells in the draft (still highlighted) and saves every other edit.
+    const problems=p.bankChangeProblems([...p.changes.values()],{required:true});
+    if(problems.length&&!automatic){await p.showValidation(problems[0]);return;}
+    const held=new Set(problems.map(x=>x.key)),snapshot=new Map([...p.changes].filter(([k])=>!held.has(k)));if(!snapshot.size)return;
+    this.status(p,'Saving NEFT and synchronizing Worksheet…');
     try {
       const result=await p.request('/api/excel/save',{id:p.id,revision:p.book.revision,changes:[...snapshot.values()]});
       p.book.revision=result.revision;
@@ -120,7 +127,10 @@ const NeftSync = {
       await this.after(p,result.neft_sync);
       p.root.querySelectorAll('.xl-modified').forEach(el=>{const input=el.querySelector('[data-cell]');if(input&&!p.changes.has(p.sheet+'!'+input.dataset.cell))el.classList.remove('xl-modified');});
       if(!p.dirty())p.message(automatic?'NEFT saved automatically.':'Changes saved.');
-    } catch(e){this.status(p,'NEFT save / Worksheet sync failed: '+e.message,true);throw e;}
+    } catch(e){
+      if(e.validation){this.status(p,'NEFT not saved: '+e.message,true);await p.showValidation(e.validation);return;}  // nothing saved; the draft is kept
+      this.status(p,'NEFT save / Worksheet sync failed: '+e.message,true);throw e;
+    }
   }
 };
 
@@ -170,13 +180,16 @@ function xlSyncText(state){
 async function xlWorksheetSynced(panel,state){
  if(!state||!panel.alive())return;
  panel.message(xlSyncText(state),state.status==='error');
+ const target=XL.panels.get('neft'),shown=target&&{id:target.id,preview:target.preview};
  await xlRefresh();
- const target=XL.panels.get('neft');
  if(!state.neft||!target||state.status==='error')return;
+ // The user opened another NEFT document (for example New Blank Template) while this sync was in flight:
+ // keep what they chose instead of switching the panel to the linked NEFT behind their back.
+ if(target.id!==shown.id||target.preview!==shown.preview)return;
  if(target.dirty()){target.message('Worksheet changes are saved. Your NEFT draft is retained; save/reset it before loading the synchronized revision.',true);return;}
  if(target.preview||target.id!==state.neft){target.resetDraft();target.id=state.neft;target.preview=false;target.sheet=state.sheet;target.grid=null;target.options();}
  if(target.id===state.neft){
-  if(target.open)await target.run(()=>target.load());
+  if(target.open)target.run(()=>target.load());   // queued, not awaited: see NeftSync.after (two panels must never wait on each other)
   else target.grid=null;
  }
 }

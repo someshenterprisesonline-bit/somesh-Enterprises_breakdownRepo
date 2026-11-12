@@ -6,7 +6,10 @@ const info=process.env.TEST_FIXTURE_INFO?JSON.parse(process.env.TEST_FIXTURE_INF
  try{
   const ctx=await browser.newContext({colorScheme:process.env.TEST_THEME||'dark',viewport:{width:1600,height:1000}});
   await ctx.route('https://fonts.googleapis.com/**',r=>r.fulfill({contentType:'text/css',body:''}));
-  const p=await ctx.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));
+  // --improvements-slow: a slow template-library refresh after each Worksheet save. It used to swallow the
+  // New Blank Template click, switch the NEFT panel to the auto-created NEFT and deadlock the two panels.
+  const slow=Number(process.env.TEST_SLOW_LIBRARY_MS||0);if(slow)await ctx.route(u=>new URL(u).pathname==='/api/excel',async r=>{const res=await r.fetch();await new Promise(x=>setTimeout(x,slow));await r.fulfill({response:res});});
+  const p=await ctx.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));const failedRequests=[];p.on('requestfailed',r=>failedRequests.push(r.url().replace(/^https?:[/][/][^/]+/,'')+' '+(r.failure()?.errorText||'')));
   const user=info?'Rupashri':'Nandha';
   const login=info?null:await ctx.request.post(process.env.TEST_BASE_URL+'/api/login',{data:{user}});
   if(login)assert.equal(login.status(),200);
@@ -43,7 +46,7 @@ const info=process.env.TEST_FIXTURE_INFO?JSON.parse(process.env.TEST_FIXTURE_INF
   const bid=await p.evaluate(()=>XL.panels.get('neft').id);
   await p.screenshot({path:path.join(process.env.TEST_ARTIFACT_DIR,'workspace-designations.png')});
   await p.goto(process.env.TEST_BASE_URL+'/?excel='+bid);
-  await p.waitForFunction(()=>document.querySelector('[data-section="neft"] [data-cell="C2"]')?.value==='Accountant').catch(async e=>{console.log(await p.evaluate(()=>[...XL.panels].map(([k,x])=>({key:k,id:x.id,preview:x.preview,revision:x.book?.revision,sheet:x.sheet,msg:x.root.querySelector('.xl-message').textContent,c2:x.root.querySelector('[data-cell="C2"]')?.value,neft:x.grid?.neft}))));throw e;});
+  await p.waitForFunction(()=>document.querySelector('[data-section="neft"] [data-cell="C2"]')?.value==='Accountant').catch(async e=>{console.log('FAILED REQUESTS',JSON.stringify(failedRequests));console.log('PROBE',JSON.stringify(await p.evaluate(()=>({url:location.href,user:S.user,tab:S.tab,token:!!S.token,meta:!!S.meta,intro:!!document.getElementById('brandIntro'),login:!!document.querySelector('[data-user]'),app:(document.querySelector('#app')||{}).textContent?.slice(0,160),panels:XL.panels.size,lib:XL.libraryState,xlnode:!!XL.node})).catch(()=>'page not ready')));console.log(await p.evaluate(()=>[...XL.panels].map(([k,x])=>({key:k,id:x.id,preview:x.preview,revision:x.book?.revision,sheet:x.sheet,msg:x.root.querySelector('.xl-message').textContent,c2:x.root.querySelector('[data-cell="C2"]')?.value,neft:x.grid?.neft}))));throw e;});
   assert.deepEqual(await p.locator('.xl-title h2').allTextContents(),['WORKSHEET','NEFT SHEET','COVERING LETTER']);
   assert.deepEqual(errors,[]);console.log('PASS section order; exact row7 payroll/protection/autosave; normalized designation lookup; Worksheet designation update; unknown-name indication; saved reopen; Chrome screenshots');
  }finally{await browser.close();}

@@ -18,7 +18,7 @@ def neft_file(count=10):
     s.append(['S.No', 'Name', 'Designation', 'Bank', 'Account Number', 'Branch', 'IFSC Code', 'Salary Amount', 'Remarks', 'Existing formula'])
     for i in range(count):
         serial = [10, 2, 1][i] if i < 3 else i + 1
-        s.append([serial, f'Employee {count-i:03}', ['Guard','Cleaner','Supervisor'][i % 3], 'Bank '+str(i), '0000'+str(i), 'Branch '+str(i), 'IFSC'+str(i), 1000+i, 'Remark '+str(i), f'=H{i+2}*2'])
+        s.append([serial, f'Employee {count-i:03}', ['Guard','Cleaner','Supervisor'][i % 3], 'Bank '+str(i), '0000'+str(i), 'Branch '+str(i), f'SBIN{i:07d}', 1000+i, 'Remark '+str(i), f'=H{i+2}*2'])
         s.cell(i+2, 5).number_format = '@'; s.cell(i+2, 2).fill = PatternFill('solid', fgColor='DDEEFF')
     other = w.create_sheet('Reference'); other['A1'] = 'Keep this sheet'; other['B1'] = '=NEFT!H2'
     out = io.BytesIO(); w.save(out); return out.getvalue()

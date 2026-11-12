@@ -6,3 +6,25 @@
 .neft-controls label{display:grid;gap:4px;font-size:12px;min-width:140px;max-width:100%;flex:1}
 .neft-controls .in{min-width:0;max-width:100%;font-size:12px}.neft-sync-status{width:100%;margin:0!important;color:var(--green);font-size:13px;font-weight:600}.neft-sync-status.neft-sync-error{color:var(--red)}.neft-sync-note{width:100%;overflow-wrap:anywhere}
 @media(max-width:650px){.neft-controls label{flex-basis:100%}.neft-controls .btn{min-height:40px}}
+
+/* VALIDATION ERROR dialog (IFSC Code / Account Number). A modal <dialog> lives in the browser's top layer, so it sits
+   above the Excel Workspace, navigation, Dynamic Island and full-screen editor; the page behind is inert and blurred. */
+dialog.xl-validation{position:fixed;inset:0;margin:auto;width:min(340px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;padding:28px 24px 20px;border:1px solid color-mix(in srgb,var(--line) 45%,transparent);border-radius:22px;background:var(--alert-card);color:var(--alert-ink);text-align:center;font-family:var(--f);box-shadow:0 1px 2px rgba(0,0,0,.08),0 24px 60px rgba(0,0,0,.28);animation:xl-validation-in 220ms cubic-bezier(.2,.9,.25,1.1) both}
+dialog.xl-validation::backdrop{background:rgba(0,0,0,.26);-webkit-backdrop-filter:blur(12px) saturate(150%);backdrop-filter:blur(12px) saturate(150%);animation:xl-validation-fade 220ms ease both}
+dialog.xl-validation.is-closing{animation:xl-validation-out 140ms ease-in both}
+dialog.xl-validation.is-closing::backdrop{animation:xl-validation-fade 140ms ease-in reverse both}
+.xl-validation-icon{display:grid;place-items:center;width:56px;height:56px;margin:0 auto 14px;border-radius:16px;background:var(--orange-soft);color:var(--orange)}
+.xl-validation-icon svg path+path{stroke:var(--orange-soft)}.xl-validation-icon svg circle{fill:var(--orange-soft)}
+.xl-validation h2{margin:0 0 8px;font-size:15px;font-weight:700;letter-spacing:.08em;color:var(--alert-ink)}
+.xl-validation-message{margin:0 0 10px;font-size:15px;line-height:1.45;color:var(--alert-ink)}
+.xl-validation-detail{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--alert-muted);overflow-wrap:anywhere}
+.xl-validation-ok{display:block;width:100%;margin-top:18px;min-height:44px;border:0;border-radius:12px;background:var(--primary-bg);color:var(--on-accent);font:600 15px/1 var(--f);cursor:pointer;transition:filter 120ms ease,transform 120ms ease}
+.xl-validation-ok:hover{filter:brightness(1.08)}.xl-validation-ok:active{transform:scale(.98)}
+.xl-validation-ok:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+@keyframes xl-validation-in{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
+@keyframes xl-validation-out{to{opacity:0;transform:scale(.96)}}
+@keyframes xl-validation-fade{from{opacity:0}to{opacity:1}}
+@media(max-width:480px){dialog.xl-validation{padding:24px 18px 16px;border-radius:18px}.xl-validation-message{font-size:14px}}
+@media(prefers-reduced-motion:reduce){dialog.xl-validation,dialog.xl-validation::backdrop,dialog.xl-validation.is-closing,dialog.xl-validation.is-closing::backdrop{animation:none}}
+/* An account number Excel already rounded (digits lost): shown as stored, flagged, never repaired by guessing. */
+.xl-grid .xl-warning{background:var(--red-soft);box-shadow:inset 3px 0 var(--red)}

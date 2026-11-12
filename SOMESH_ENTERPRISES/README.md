@@ -60,14 +60,14 @@ Employee PC (Chrome) ──https://ADMIN-IP:8443 or http://ADMIN-IP:8080──�
 
 Each employee needs only Google Chrome and the **Employee PC Kit**: no Git clone, Python, MySQL, Node.js or database. Everyone works in the one shared database on the Admin PC, so changes (tasks, statuses, alerts, employee details, Excel Workspace versions) appear on every signed-in PC within a second, with nothing to update or sync by hand.
 
-**Admin, once (and after the Admin PC's address changes):** `python tools\make_office_cert.py --kit-only --url https://192.168.1.4:8443` rebuilds `certs\employee-pc-kit\` and `certs\employee-pc-kit.zip` from the existing office CA. The kit has exactly three files: the launcher, `office-ca.crt` (public certificate only) and `somesh-server-url.txt`. The tool pins the office CA's SHA-256 fingerprint inside the kit's launcher and prints it. The kit never contains a private key, the database or settings.
+**Admin, once (and after the Admin PC's address changes):** `python tools\make_office_cert.py --kit-only --url https://192.168.1.13:8443` rebuilds `certs\employee-pc-kit\` and `certs\employee-pc-kit.zip` from the existing office CA. The kit has exactly three files: the launcher, `office-ca.crt` (public certificate only) and `somesh-server-url.txt`. The tool pins the office CA's SHA-256 fingerprint inside the kit's launcher and prints it. The kit never contains a private key, the database or settings.
 
 **Employee, every day:**
 
 1. Copy the kit folder (or unzip `employee-pc-kit.zip`) to the employee PC, for example to the Desktop.
 2. Double-click **`OPEN SOMESH ENTERPRISES (Employee PC).bat`**.
 3. **First time only:** if this Windows user does not trust the office certificate yet, the launcher checks that `office-ca.crt` is exactly the office CA (its fingerprint must match the one pinned in the kit), shows the name and SHA-256 fingerprint and asks **Install the office certificate now? [Y/N]**. Press **Y**, then click **Yes** in the Windows Security Warning. A certificate that does not match is never installed. A launcher without a pinned fingerprint (the plain repository copy) never installs one.
-4. The launcher checks that the Admin PC answers at `https://192.168.1.4:8443`, with full certificate checking. If the server cannot be reached it explains why (server window closed, not on the office network, certificate not trusted, or PC not allowed) and offers **[R] Try again, [O] Open Chrome anyway, [Q] Quit**.
+4. The launcher checks that the Admin PC answers at its saved address (currently `https://192.168.1.13:8443`), with full certificate checking. If the server cannot be reached it explains why (server window closed, not on the office network, certificate not trusted, or PC not allowed) and offers **[R] Try again, [O] Open Chrome anyway, [Q] Quit**.
 5. Chrome opens the shared app. Choose your name on the sign-in screen. Admins also enter their PIN.
 
 Without the kit, open Chrome at the address shown in the SERVER MODE window and bookmark it. HTTPS then needs the CA installed by hand: download `http://ADMIN-IP:8080/office-ca.crt`, compare its SHA-256 fingerprint with the one `make_office_cert.py` printed, then run `certutil -user -addstore Root office-ca.crt`.
@@ -113,6 +113,8 @@ After each successful change, the server pushes a small notice over Server-Sent 
 | HTTP 403 "not on an approved office network" | The client address is outside `network.allowed_networks`. |
 | Red banner "connection lost" | The page reconnects automatically when the server is reachable again. |
 | Startup says the database check failed | Restore the latest good backup (above). |
+| Employee PC cannot reach the address in the kit | The Admin PC's IP changed (for example the Ethernet cable was unplugged and only Wi-Fi remains). Check `ipconfig`, then rebuild the kit with `python tools\make_office_cert.py --kit-only --url https://NEW-IP:8443`. The server certificate must list that IP; if it does not, re-run `tools\make_office_cert.py` (the office CA is reused). |
+| Page shows "Unable to load user profiles: syncClock is not defined" | A script failed to load. Older servers queued only 5 incoming connections and Windows refused the rest during busy moments; the server now queues 128. Restart SERVER MODE after updating, then reload the page. |
 
 ## Folder structure
 
@@ -215,7 +217,7 @@ $env:PLAYWRIGHT_MODULE_PATH = 'C:\path\to\test-tools\node_modules\playwright'
 python tests/run_browser.py
 ```
 
-Shared-host checks: `python -m unittest tests.test_lan_sharing` (network allowlist, cross-site POSTs, sessions, sequenced/targeted live notices, HTTPS, backup/restore) and `python tests/run_browser.py --lan` (four separate Chrome sessions: live task assignment and start, admin settings, reconnection after an outage, Excel version sync and stale-save rejection). `python tests/run_browser.py --multi-user` uses separate Chrome sessions for an Admin, Employee A and Employee B on one server. It checks that A gets the assigned task live, that B cannot see, start or approve it, that admin-only APIs return 403 for employees and that a missing or forged session gets 401, that A's start and submit reach the approver live, that a refresh keeps the data, and that employee-detail edits reach other sessions. `python -m unittest tests.test_employee_launcher` runs the real Employee PC launcher on Windows in test mode (`SOMESH_LAUNCHER_TEST=1`: no Chrome, every prompt answered No). It covers a reachable server, an unreachable server, a bad address, a wrong certificate that is never installed, a launcher without a pin, and a kit that holds no secrets.
+Shared-host checks: `python -m unittest tests.test_lan_sharing` (network allowlist, cross-site POSTs, sessions, sequenced/targeted live notices, HTTPS, backup/restore) and `python tests/run_browser.py --lan` (four separate Chrome sessions: live task assignment and start, admin settings, reconnection after an outage, Excel version sync and stale-save rejection). `python tests/run_browser.py --multi-user` uses separate Chrome sessions for an Admin, Employee A and Employee B on one server. It checks that A gets the assigned task live, that B cannot see, start or approve it, that admin-only APIs return 403 for employees and that a missing or forged session gets 401, that A's start and submit reach the approver live, that a refresh keeps the data, and that employee-detail edits reach other sessions. `python -m unittest tests.test_server_backlog` checks that a burst of 40 simultaneous connections is queued, not refused. `python -m unittest tests.test_employee_launcher` runs the real Employee PC launcher on Windows in test mode (`SOMESH_LAUNCHER_TEST=1`: no Chrome, every prompt answered No). It covers a reachable server, an unreachable server, a bad address, a wrong certificate that is never installed, a launcher without a pin, and a kit that holds no secrets.
 
 The runner starts a synthetic app on a free loopback port and closes it afterward. Set `BROWSER_CHANNEL` for another installed channel; on other platforms install Playwright's Chromium browser. No deployment PIN or installed database is used.
 
@@ -232,7 +234,13 @@ The runner starts a synthetic app on a free loopback port and closes it afterwar
 - **Keep credentials private.** Exclude `.env`, credentials, caches, logs and test downloads. Deployment config/profile/workflow JSON is local and ignored; commit only the safe `.example.json` files. Existing local files and credentials are preserved. Older repository history may still contain the previously tracked settings; keep access restricted and rotate any credentials previously published.
 - **Watch the shared config files.** The Workflow input page rewrites `backend/workflow.json` and `backend/users.json`. Commit those only when the process change is meant for everyone.
 
-See **GIT_SETUP.md** for the branch-and-pull-request routine, so two people can push at the same time without overwriting each other.
+See **GIT_SETUP.md** for the branch-and-pull-request routine, so two people can push at the same time without overwriting each other. In short:
+
+1. `git fetch origin` and start from the latest `main`: `git switch main`, `git pull --ff-only`, then `git switch -c feature/short-name`.
+2. Commit small, reviewed changes. Never commit `data/`, `storage/`, `certs/`, `backend/config.json`, `users.json`, `workflow.json` or anything with employee bank details; `.gitignore` covers these, so check `git status` before every commit.
+3. Before pushing, `git fetch origin` and `git merge origin/main` (or rebase your *unpushed* commits only), resolve conflicts keeping both people's work, and rerun the tests.
+4. Push your branch and open a pull request, or push to `main` only when nobody else's work is pending. Never `git push --force` to a shared branch.
+5. After updating the Admin PC, restart SERVER MODE for backend changes. Frontend changes need only a page reload (Ctrl+F5).
 
 ## Admin employee management
 
@@ -297,6 +305,29 @@ The open linked Worksheet refreshes without reloading the page. Use **Open linke
 
 Run `python tests/run_browser.py --neft` with Playwright/Chrome configured as above; repeat with `$env:TEST_THEME='dark'`. These checks use disposable synthetic databases and verify manual entry, all sorts, unsaved payroll preservation, edits/undo, row addition/deletion, refresh/reopen, 100-row uploads, separate employee documents and both Excel downloads. Screenshots remain under ignored `data/neft-sync-audit/`. Backend/API tests are included in the normal unittest discovery command.
 
+**New Blank Template** stays usable while the template list refreshes after a Worksheet save, and a Worksheet sync never switches the NEFT panel away from a document you just opened. Each panel queues the other's reload instead of waiting for it, so a NEFT save and a Worksheet save at the same moment cannot block each other. `python tests/run_browser.py --improvements-slow` repeats the Worksheet/NEFT designation journey with a deliberately slow template library to guard these cases.
+
+
+## NEFT bank fields: IFSC Code and Account Number
+
+The NEFT SHEET's **IFSC CODE** and **ACCOUNT NUMBER** columns are found by their header text (for example `IFSC CODE`, `ACCOUNT NUMBER`, `A/C No`), not by a fixed column letter. The rules live in `backend/bank_fields.py` and are mirrored in the browser; the server re-checks every save.
+
+**IFSC Code**
+- Exactly **11 characters**, stored as text. Spaces before or after are ignored; nothing else is changed, and an invalid code is never cut short or saved. Leading zeroes are kept.
+- Checked when the cell is committed (Enter, Tab or leaving the cell), on paste, on upload and on save. Never while you are still typing.
+- A wrong length opens a centred **VALIDATION ERROR** dialog: "IFSC Code must contain exactly 11 characters. Please check the entered IFSC Code." It shows how many characters were entered and the cell. The page behind is blurred and inert. **OK**, **Enter** or **Esc** closes it, and focus returns to the cell. It works in Light and Dark mode, at desktop, tablet and phone widths.
+- Removing the IFSC Code of a row that has an account number is refused. A row still being filled in (account number entered, IFSC not yet) saves normally, so autosave never loses work.
+- Autosave keeps an invalid IFSC cell in your draft (highlighted) and saves your other edits. **Save Changes** shows the dialog instead of saving. A multi-cell paste containing an invalid IFSC is cancelled as a whole.
+- Uploads with invalid IFSC codes are refused before anything is stored. The message lists the cells and their lengths.
+
+**Account Number**
+- Digits only, **any length**, always text: never a number, never rounded, never in scientific notation (`1.23457E+15`), leading zeroes kept. The column is wide enough to show 30 digits.
+- Excel downloads write account numbers as **Text cells**, including old workbooks that stored them as numbers, so Excel shows every digit.
+- If Excel already rounded a number before upload (a floating-point value or text such as `1.23457E+15`), the upload is refused and the cell is named. The missing digits are never guessed. Format the column as Text in Excel, re-enter the numbers and upload again.
+
+Downloads of an unchanged document are byte-identical (regenerated files keep the stored file's timestamps and document properties).
+
+Tests: `python -m unittest tests.test_bank_fields` (API and rules) and `python tests/run_browser.py --bank` (Chrome: IFSC 5/10/11/12/15 characters, empty/required, paste, autosave, server rejection, account numbers of 10/16/20/30 digits and leading zero through save, reload and download; dialog position, blur, contrast and keyboard in Light/Dark at 1440, 768 and 390 px). Screenshots go to the ignored `data/bank-fields-audit/`.
 
 ## Excel Workspace order, designations and first employee row
 

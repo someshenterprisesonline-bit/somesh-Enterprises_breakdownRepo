@@ -14,7 +14,7 @@ const info=JSON.parse(process.env.TEST_FIXTURE_INFO).neft, base=process.env.TEST
   const n=p.locator('[data-section="neft"]'),w=p.locator('[data-section="worksheet"]');
   await w.locator('.xl-title').click();await w.locator('.xl-grid').waitFor();
   await n.locator('[data-xl="blank"]').click();await p.waitForFunction(()=>!XL.panels.get('neft').preview&&!XL.panels.get('neft').busy);
-  const rows=Array.from({length:10},(_,i)=>[[10,2,1][i]||i+1,'Person '+String(10-i).padStart(3,'0'),i%2?'Cleaner':'Guard','Bank '+i,'0000'+i,'Branch '+i,'IFSC'+i,1000+i,'Note '+i]);
+  const rows=Array.from({length:10},(_,i)=>[[10,2,1][i]||i+1,'Person '+String(10-i).padStart(3,'0'),i%2?'Cleaner':'Guard','Bank '+i,'0000'+i,'Branch '+i,'SBIN'+String(i).padStart(7,'0'),1000+i,'Note '+i]);
   await n.locator('[data-cell="A2"]').evaluate((el,text)=>{const d=new DataTransfer();d.setData('text/plain',text);el.dispatchEvent(new ClipboardEvent('paste',{clipboardData:d,bubbles:true,cancelable:true}));},rows.map(r=>r.join('\t')).join('\n'));
   async function settled(){await p.waitForFunction(()=>{const n=XL.panels.get('neft'),w=XL.panels.get('worksheet');return !n.busy&&!n.dirty()&&n.grid?.neft?.status==='synced'&&!w.busy&&w.id===n.grid.neft.target&&w.book?.revision===n.grid.neft.target_revision&&!!w.grid;});}
   await settled();
